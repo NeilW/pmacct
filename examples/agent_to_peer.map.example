@@ -1,0 +1,32 @@
+! 
+! NetFlow/sFlow agent to BGP peer map
+!
+! File syntax is key-based. Read full syntax rules in 'pretag.map.example' in
+! this same directory.
+!
+! nfacctd, sfacctd: valid keys: id, ip.
+!
+! list of currently supported keys follow:
+!
+! 'id'			IPv4 address or router ID of the BGP peer
+! 'ip'                  In nfacctd it's compared against the source IP address
+!                       of the device which is originating NetFlow packets; in
+!                       sfacctd this is compared against the AgentId field of
+!                       received sFlow samples.
+!
+! A couple of straightforward examples follow.  
+!
+id=1.2.3.4	ip=2.3.4.5
+!
+! The following comes handy when compiling pmacct for IPv6; BGP peers
+! are always IPv4 addresses. Whereas remote sFlow or NetFlow agents are
+! likely to be intended as IPv4-mapped IPv6 addresses, if nfacctd_ip is
+! not specified.
+!
+! id=3.4.5.6	ip=::ffff:4.5.6.7
+!
+! The following maps something which isn't a Netflow/sFlow agent to the
+! specified BGP peer. The only application for this lies with pmacctd.
+!
+! id=4.5.6.7	ip=0.0.0.0
+!

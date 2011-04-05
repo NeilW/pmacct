@@ -1,0 +1,254 @@
+! 
+! Pre-Tagging map -- multiplexes various fields into a 4-bytes numerical-only ID 
+!
+! File syntax is key-based. Position of keys inside the same row (rule) is not
+! relevant; Spaces are not allowed (ie. 'id = 1' is not valid). The first full
+! match wins (like in firewall rules). Negative values mean negations (ie. match
+! data NOT entering interface 2: 'in=-2'); 'id', 'id2', 'ip' and 'filter' keys
+! don't support negative values. 'label', 'jeq', 'return' and 'stack' keys can
+! be used to alter the standard rule evaluation flow.
+!
+! nfacctd: valid keys: id, id2, ip, in, out, engine_type, engine_id, nexthop,
+! bgp_nexthop, src_as, dst_as, direction, v8agg, sampling_rate and filter;
+! mandatory keys for each rule: id or id2 and ip.
+!
+! sfacctd: valid keys: id, id2, ip, in, out, agent_id, nexthop, bgp_nexthop,
+! src_as, dst_as, sampling_rate and filter; mandatory keys for each rule: id or
+! id2 and ip.
+!
+! pmacctd: valid keys: id, id2, src_as, dst_as and filter. Only either id or id2
+! are mandatory for each rule. 
+!
+! sfacctd, nfacctd when in 'tee' mode: valid keys: id, id2, ip;  mandatory keys
+! for each rule: id or id2 and ip.
+!
+! BGP-related keys are independent of the collection method in use, hence apply
+! to all daemons (BGP daemon must be enabled): src_as, dst_as, src_comms, comms,
+! peer_src_as, peer_dst_as, src_local_pref, local_pref.
+!
+! list of currently supported keys follows:
+!
+! 'id'			tag assigned to a matching packet, flow or sample; its
+!			use is mutually exclusive with id2. The resulting label
+!			is written to the 'tag' field when using memory tables
+!			and 'agent_id' when using a SQL plugin. 
+! 'id2'			tag assigned to a matching packet, flow or sample; its
+!			use within a rule is mutually exclusive with 'id'. The
+!			resulting label is written to the 'tag2' field when
+!			using memory tables and 'agent_id2' when using a SQL
+!			plugin. If using a SQL plugin, read more about the
+!			'agent_id2' field in the 'sql/README.agent_id2' document
+! 'ip'			In nfacctd it's compared against the source IP address
+!			of the device which is originating NetFlow packets; in
+!			sfacctd this is compared against the AgentId field of
+!			received sFlow samples.
+! 'in'  		Input interface 
+! 'out' 		Output interface 
+! 'engine_type'		In NetFlow V5 it's compared against the 'engine_type'
+!			header field. In NetFlow V9 it's compared against the
+!			3rd octet of the 'source_id' header field. Provides
+!			uniqueness with respect to the routing engine on the
+!			exporting device.
+! 'engine_id'		In NetFlow V5 it's compared against the 'engine_id'
+!			header field. In NetFlow V9 it's compared against the
+!			4th octet of the 'source_id' header field. It provides
+!			uniqueness with respect to the particular line card on
+!			the exporting device.
+! 'nexthop'		IPv4/IPv6 address of the next-hop router
+! 'bgp_nexthop'		IPv4/IPv6 address of the next-hop BGP router
+! 'filter'		Matches incoming packets against the supplied filter
+!			expression (expected in libpcap syntax); the filter
+!			needs to be enclosed in quotes ('). 
+! 'v8agg'		In NetFlow V8 this is compared against the aggregation
+!			method in use. Valid values are in the range 0 > value
+!			> 15. 
+! 'agent_id'		In sFlow v5 it's compared against the subAgentId field.
+!			sFlow v2/v4 do not carry such field, hence it does not
+!			apply.
+! 'sampling_rate'       In sFlow v2/v4/v5 this is compared against the sampling
+!			rate field; it also works against NetFlow v5. NetFlow v9
+!			and IPFIX are unsupported instead.
+! 'direction'		In NetFlow v9 and IPFIX this is compared against the
+!			direction (61) field, which only valid values are 0
+!			(ingress) and 1 (egress) flow.
+! 'src_as'		source Autonomous System Number. Whether BGP daemon is
+!			not enabled in pmacctd it works only against a Networks
+!			map (see 'networks_file' directive); in nfacctd and
+!			sfacctd it works against a Networks Map, the source ASN
+!			field in either sFlow or NetFlow datagrams. Since 0.12,
+!			this can be compared against the corresponding BGP RIB
+!			of the exporting device (see 'bgp_daemon' configuration
+!			directive).
+! 'dst_as'              destination Autonomous System Number. Same 'src_as'
+!			remarks hold here. Please read them above.
+! 'peer_src_as'		peering source Autonomous System Number. It is compared
+!			against the corresponding BGP RIB of the exporting
+!			device (see 'bgp_daemon' configuration directive).
+! 'peer_dst_as'		peering destination Autonomous System Number. Same
+!			'peer_src_as' remarks hold here. Please read them above.
+! 'src_local_pref'      Source IP prefix BGP local preference attribute. This is
+!			compared against the BGP RIB of the exporting device.
+! 'local_pref'		Destination IP prefix BGP local preference attribute.
+!			This is compared against the BGP RIB of the exporting
+!			device.  
+! 'src_comms'           Source IP prefix BGP standard communities attribbute;
+!			multiple elements, up to 16, can be supplied, comma-
+!			separated (no spaces allowed); the check is successful
+!			if any of the communities is matched. This is compared
+!			against the BGP RIB of the exporting device. Examples
+!			are provided below.
+! 'comms'		Destination IP prefix BGP standard communities; multiple
+!			elements, up to 16, can be supplied, comma-separated (no
+!			spaces allowed); the check is successful if any of the
+!			communities is matched. This is compared against the BGP
+!			RIB of the exporting device. See examples below.
+! 'label'		Mark the rule with label's value. Labels don't need to
+!			be unique: when jumping, the first matching label wins.
+!			Label value 'next' is reserved for internal use and
+!			hence must not be used in a map. Doing otherwise might
+!			give unexpected results.
+! 'jeq'			Jump on EQual. Jumps to the supplied label in case of
+!			rule match. Jumps are Only forward. Label "next" is
+!			reserved and causes to go to the next rule, if any.
+!			Before continuing the map workflow, tagged data can be
+!			optionally returned to plugins (jeq=xxx return=true).
+!			Disabled by default (ie. return=false). Beware setting
+!			return=true, depending on configurations, can generate
+!			spurious data or duplicates; the logics with which this
+!			is intended to work is: plugins which include 'tag' in
+!			their aggregation method will receive each tagged copy
+!			(if not filtered out by the pre_tag_filter directive);
+!			plugins not configured for tags will only receive a
+!			single copy of the data.
+! 'return'		Works only associated to a 'jeq' and is set to 'false'
+!			by default. Read full details in the 'jeq' section. If
+!			set to 'true', after tagged data is sent for accounting,
+!			the tag is zeroed making essentially this feature not
+!			compatible with a 'stack' one.
+! 'stack'		Currently '+' (ie. sum symbol) is the unique supported
+!			value. This key makes sense only if JEQs are in use.
+!			When matching, accumulate tags, using the specified
+!			operator/function. By setting 'stack=+', the resulting
+!			tag would be: <tag>=<previous ID + current ID>. 
+!
+!
+! Examples:
+!
+! Some examples applicable to NetFlow.
+!
+id=1	ip=192.168.2.1	in=4
+id=10	ip=192.168.1.1 	in=5	out=3
+id=11	ip=192.168.1.1 	in=3	out=5
+id=12	ip=192.168.1.1	in=3 
+id=13	ip=192.168.1.1  nexthop=10.0.0.254
+id=14	ip=192.168.1.1  engine_type=1 engine_id=0
+id=15	ip=192.168.1.1  in=3 filter='src net 192.168.0.0/24' 
+
+!
+! The following rule applies to 'pmacctd'; it will return an error if applied to either
+! 'nfacctd' or 'sfacctd'
+!
+id=21	filter='src net 192.168.0.0/16'
+
+!
+! A few examples sFlow-related. The format of the rules is the same of 'nfacctd' ones
+! but some keys don't apply to it. 
+!
+id=30 ip=192.168.1.1 
+id=31 ip=192.168.1.1 out=50
+id=32 ip=192.168.1.1 out=50 agent_id=0 sampling_rate=512
+
+!
+! === JEQ example #1:
+! - implicit 'return' defaults to false
+! - 'id' used to store input interface tags
+! - 'id2' used to store output interface tags
+!
+id=1000 ip=192.168.1.1 in=1 jeq=eval_out 
+id=1001 ip=192.168.1.1 in=2 jeq=eval_out
+id=1002 ip=192.168.1.1 in=3 jeq=eval_out
+! ... further INs
+id2=1000 ip=192.168.1.1 out=1 label=eval_out
+id2=1001 ip=192.168.1.1 out=2 
+id2=1002 ip=192.168.1.1 out=3 
+! ... further OUTs
+!
+! ===
+!
+! === JEQ example #2:
+! - implicit 'return' defaults to false
+! - 'id' structured hierarchically to store both input and output interface tags
+!
+id=11000 ip=192.168.1.1 in=1 jeq=eval_out
+id=12000 ip=192.168.1.1 in=2 jeq=eval_out
+id=13000 ip=192.168.1.1 in=3 jeq=eval_out
+! ... further INs
+id=100 ip=192.168.1.1 out=1 label=eval_out stack=+
+id=101 ip=192.168.1.1 out=2 stack=+
+id=102 ip=192.168.1.1 out=3 stack=+
+! ... further OUTs 
+!
+! ===
+!
+! === JEQ example #3:
+! - 'return' set to true: upon matching, the packet is passed to the plugins along with its tag.
+!   The pre_tag_map flow continues by following up the JEQ.
+! - The above leads to duplicates. Hence a pre_tag_filter should be used to split packets among plugins.  
+! - 'id' used to temporarily store both input and output interface tags
+!
+id=1001 ip=192.168.1.1 in=1 jeq=eval_out return=true
+id=1002 ip=192.168.1.1 in=2 jeq=eval_out return=true
+id=1003 ip=192.168.1.1 in=3 jeq=eval_out return=true
+! ... further INs
+id=2001 ip=192.168.1.1 out=1 label=eval_out 
+id=2002 ip=192.168.1.1 out=2 
+id=2003 ip=192.168.1.1 out=3 
+! ... further OUTs
+!
+! pre_tag_filter[in]: 1001-1003
+! pre_tag_filter[out]: 2001-2003
+!
+! ===
+!
+! === BGP standard communities example #1
+! - check is successful if matches either 65000:1234 or 65000:2345
+!
+id=100 ip=192.168.1.1 comms=65000:1234,65000:2345
+!
+! ===
+!
+! === BGP standard communities example #2
+! - a series of checks can be piled up in order to mimic match-all
+! - underlying logics is:
+!   > tag=200 is considered a successful check;
+!   > tag=0 or tag=100 is considered unsuccessful
+!
+id=100 ip=192.168.1.1 comms=65000:1234 label=65000:1234 jeq=65000:2345
+id=100 ip=192.168.1.1 comms=65000:2345 label=65000:2345 jeq=65000:3456
+! ... further id=100 
+id=200 ip=192.168.1.1 comms=65000:3456 label=65000:3456
+!
+! ===
+!
+! === sfprobe/nfprobe: determining semi-dynamically direction and ifindex 
+! - Two steps approach:
+!   > determine direction first (1=in, 2=out)
+!   > then short circuit it to return an ifindex value
+! - Configuration would look like the following fragment:
+!   ...
+!   nfprobe_direction: tag
+!   nfprobe_ifindex: tag2
+!   ...
+!
+id=1 filter='ether dst 00:11:22:33:44:55' jeq=fivefive
+id=1 filter='ether dst 00:11:22:33:44:66' jeq=sixsix
+id=1 filter='ether dst 00:11:22:33:44:77' jeq=sevenseven
+id=2 filter='ether src 00:11:22:33:44:55' jeq=fivefive
+id=2 filter='ether src 00:11:22:33:44:66' jeq=sixsix
+id=2 filter='ether src 00:11:22:33:44:77' jeq=sevenseven
+!
+id2=5 label=fivefive
+id2=6 label=sixsix
+id2=7 label=sevenseven
+! 
+! ===

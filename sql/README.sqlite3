@@ -1,0 +1,120 @@
+To create the database and the table you have to execute the following scripts.
+Remember that SQLite - unlike MySQL and PostgreSQL - does not endorse concepts
+of authentication (username and password couple) and permissions which are
+embedded into the filesystem instead. The database filename '/tmp/pmacct.db'
+is just a trivial example: you are free to build the database wherever fits
+better for you on the system (e.g., to follow a partitioning scheme, impose 
+specific permissions, etc.). 
+
+- To create v1 tables:
+  * sqlite3 /tmp/pmacct.db < pmacct-create-table.sqlite3
+
+- To use v1 tables:
+  * data will be available in 'acct' table of 'pmacct' DB.
+  * Add 'sql_table_version: 1' line to your configuration.
+
+Similarly, v2 to v7 tables:
+
+- To create v2 tables:
+  * sqlite3 /tmp/pmacct.db < pmacct-create-table_v2.sqlite3
+
+- To use v2 tables:
+  * data will be available in 'acct_v2' table of 'pmacct' DB.
+  * Add 'sql_table_version: 2' line to your configuration.
+
+[ ... ]
+
+- To create v7 tables:
+  * sqlite3 /tmp/pmacct.db < pmacct-create-table_v7.sqlite3
+
+- To use v7 tables:
+  * data will be available in 'acct_v7' table of 'pmacct' DB.
+  * Add 'sql_table_version: 7' line to your configuration.
+
+Similarly, BGP tables:
+
+- To create BGP v1 tables:
+  * sqlite3 /tmp/pmacct.db < pmacct-create-table_bgp_v1.sqlite3
+
+- To use BGP v1 tables:
+  * data will be available in 'acct_bgp' table of 'pmacct' DB.
+  * Add 'sql_table_version: 1' line to your configuration.
+  * Add 'sql_table_type: bgp' line to your configuration.
+
+- To understand difference between the various table versions:
+  * Do you need any of the BGP primitives ? Then look the next section.
+  * Do you need TCP flags ? Then you have to use v7.
+  * Do you need both IP addresses and AS numbers in the same table ? Then you have to use v6.
+  * Do you need packet classification ? Then you have to use v5.
+  * Do you need flows (other than packets) accounting ? Then you have to use v4.
+  * Do you need ToS/DSCP field (QoS) accounting ? Then you have to use v3.
+  * Do you need agent ID for distributed accounting and packet tagging ? Then you have to use v2. 
+  * Do you need VLAN traffic accounting ? Then you have to use v2.
+  * If all of the above points sound useless, then use v1.
+
+- To understand difference between the various BGP table versions:
+  * Only BGP table v1 is currently available.
+
+- Aggregation primitives to SQL schema mapping:
+  Aggregation primitive => SQL table field
+  * tag => agent_id (INT(8) NOT NULL DEFAULT 0)
+  * tag2 => agent_id2 (INT(8) NOT NULL DEFAULT 0, see README.agent_id2)
+  * src_as => as_src (INT(8) NOT NULL DEFAULT 0)
+  * dst_as => as_dst (INT(8) NOT NULL DEFAULT 0)
+  * peer_src_as => peer_as_src (INT(8) NOT NULL DEFAULT 0)
+  * peer_dst_as => peer_as_dst (INT(8) NOT NULL DEFAULT 0)
+  * peer_src_ip => peer_ip_src (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * peer_dst_ip => peer_ip_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * std_comm => comms (CHAR(24) NOT NULL DEFAULT ' ')
+  * ext_comm => comms (CHAR(24) NOT NULL DEFAULT ' ')
+  * as_path => as_path (CHAR(21) NOT NULL DEFAULT ' ')
+  * local_pref => local_pref (INT(8) NOT NULL DEFAULT 0)
+  * med => med (INT(8) NOT NULL DEFAULT 0)
+  * src_std_comm => comms_src (CHAR(24) NOT NULL DEFAULT ' ')
+  * src_ext_comm => comms_src (CHAR(24) NOT NULL DEFAULT ' ')
+  * src_as_path => as_path_src (CHAR(21) NOT NULL DEFAULT ' ')
+  * src_local_pref => local_pref_src (INT(8) NOT NULL DEFAULT 0)
+  * src_med => med_src (INT(8) NOT NULL DEFAULT 0)
+  * is_symmetric => is_symmetric (INT(2) NOT NULL DEFAULT 0, see README.is_symmetric)
+  * in_iface => iface_in (INT(8) NOT NULL DEFAULT 0, see README.iface)
+  * out_iface => iface_out (INT(8) NOT NULL DEFAULT 0, see README.iface)
+  * src_mask => mask_src (INT(2) NOT NULL DEFAULT 0, see README.mask)
+  * dst_mask => mask_dst (INT(2) NOT NULL DEFAULT 0, see README.mask)
+  * cos => cos (INT(2) NOT NULL DEFAULT 0, see README.cos)
+  * class => class_id (CHAR(16) NOT NOT NULL DEFAULT ' ')
+  * src_mac => mac_src (CHAR(17) NOT NULL DEFAULT '0:0:0:0:0:0')
+  * dst_mac => mac_dst (CHAR(17) NOT NULL DEFAULT '0:0:0:0:0:0')
+  * vlan => vlan (INT(4) NOT NULL DEFAULT 0)
+  * src_as => as_src (INT(8) NOT NULL DEFAULT 0)
+  * dst_as => as_dst (INT(8) NOT NULL DEFAULT 0)
+  * src_host => ip_src (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * dst_host => ip_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * src_net => ip_src (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * dst_net => ip_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * src_port => src_port (INT(4) NOT NULL DEFAULT 0)
+    - src_port => port_src (INT(4) NOT NULL DEFAULT 0, if sql_table_version: 8)
+  * dst_port => dst_port (INT(4) NOT NULL DEFAULT 0)
+    - dst_port => port_dst (INT(4) NOT NULL DEFAULT 0, if sql_table_version: 8)
+  * tcpflags => tcp_flags (INT(2) NOT NULL DEFAULT 0)
+  * proto => ip_proto (INT(2) NOT NULL DEFAULT 0)
+  * tos => tos (INT(4) NOT NULL DEFAULT 0)
+
+- Counters and time reference need always to be defined as part of the SQL schema:
+  * packets (INT(4) UNSIGNED NOT NULL)
+  * bytes (INT(8) UNSIGNED NOT NULL)
+  * stamp_inserted (DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', enabled by sql_history)
+  * stamp_updated (DATETIME, enabled by sql_history)
+
+NOTE: mind to specify EVERYTIME which SQL table version you
+intend to adhere to by using either of the following rules:
+
+When using commandline options:
+  * -v [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 ]
+
+When using configuration directives:
+  * sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 ]
+  * sql_table_type: [ bgp ]
+
+NOTE: specifying a non-documented SQL table profile will result
+in an non-determined behaviour. Unless this will create crashes
+to the application, such situations will not be supported.

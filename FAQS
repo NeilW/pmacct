@@ -1,0 +1,309 @@
+pmacct (Promiscuous mode IP Accounting package)
+pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+
+Q1: What is pmacct project homepage ?
+A: It is http://www.pmacct.net/ . There isn't any official mirror site. 
+
+
+Q2: 'pmacct', 'pmacctd', 'nfacctd', 'sfacctd', 'uacctd' -- but what do they mean ?
+A: 'pmacct' is intended to be the name of the project; 'pmacctd' is the name of the
+   libpcap-based IPv4/IPv6 accounting daemon; 'nfacctd' is the name of the NetFlow
+   (versions supported NetFlow v1 to v9) and IPFIX accounting daemon; 'sfacctd' is
+   the name of the sFlow v2/v4/v5 accounting daemon; 'uacctd' is the name of the
+   Linux Netlink ULOG-based accounting daemon.
+
+
+Q3: Does pmacct stand for Promiscuous mode IP Accounting package ?
+A: That is not entirely correct today, it was originally though. pmacct born as a
+   libpcap-based project only. Over the time it evolved to include NetFlow first,
+   sFlow shortly afterwards and ULOG more recently - striving to maintain a consistent
+   implementation over the set, unless technical considerations prevent that to happen
+   for specific cases.  
+
+
+Q4: What are pmacct main features?
+A: pmacct can collect, replicate and export network data. Collect in memory tables or
+   open-source SQL databases (MySQL, PostgreSQL, SQLite 3.x, BerkeleyDB 5.x via SQLite
+   API). Export speaking sFlow v5, NetFlow v1/v5/v9 and IPFIX. pmacct is able to perform
+   data aggregation; it can also filter, sample, renormalize, tag, classify at L7. With
+   release 0.12 pmacct integrates a BGP daemon within its NetFlow and sFlow collectors
+   aimed at increasing visibility into the network traffic.
+
+
+Q5: Does any of the pmacct daemons logs to flat files?
+A: No. For a variety of reasons. Mainly, flat-files are used in two-stages approaches:
+   first log everything down, then aggregate to process - while pmacct aims to a single
+   stage approach to improve query response time and resources utilization; flat-files
+   use proprietary formats which often translates is poor query flexibility (compared
+   to the potential offered by the SQL language) and lack of recovery tools in case of
+   file corruption. And finally innovation: other projects already largely stress this
+   rather traditional approach (libpcap: tcpdump; NetFlow: nfcapd, flowd, flow-tools;
+   sFlow: sflowtools) making not attractive to just add one more to the list.
+
+
+Q6: Is it feasible for pmacct to scale by making use of either memory tables or RDBMS
+    as backend for logging network traffic?
+A: pmacct doesn't log network traffic at packet/micro-flow level: it allows to get an
+   aggregated view of the traffic -- both in space and in time. On top of that, there
+   are layers of filtering, sampling and tagging. These are the keys to scale. As
+   these features are fully configurable, data granularity and resolution can be, at
+   any given moment, traded off in favour of increased scalability or less resources
+   consumption. 
+
+
+Q7: When using pmacctd, i feel a high CPU usage: i see the process getting a great
+    share of the CPU. How to reduce it ?  
+A: Granted that the CPU in use for accounting purposes is somewhat 'compatible' with
+   the amount of traffic it has to process, it's possible to reduce the CPU share by
+   avoiding unnecessary copies of data, also optimizing and buffering the necessary
+   ones. Kernel-to-userspace copies are critical and hence the first to be optimized;
+   for this purpose you may look at the following solutions: 
+
+   libpcap-mmap, http://public.lanl.gov/cpw/ : a libpcap version which supports mmap()
+   on the linux kernel 2.[46].x . Applications, like pmacctd, need just to be linked
+   against the mmap()ed version of libpcap to work correctly. 
+
+   PF_RING, http://www.ntop.org/PF_RING.html : it's a new type of network socket that
+   improves the packet capture speed; it's available for Linux kernels 2.[46].x; it's
+   kernel based; has libpcap support for seamless integration with existing applications.
+
+   Device polling: it's available since FreeBSD 4.5REL kernel and needs just kernel
+   recompilation (with "options DEVICE_POLLING"), and a polling-aware NIC. Linux kernel
+   2.6.x also supports device polling. 
+
+   Then also look at internal buffering which is applicable to all the pmacctd/nfacctd/
+   sfacctd daemons (for in-depth information you might want to see also 'Communications
+   between core process and plugins' chapter of the INTERNALS document):
+
+   'plugin_buffer_size': turns on bufferization. '1024', '2048' or '4096' are sufficient
+   values for common environments. If the circular queue size (plugin_pipe_size) is not
+   defined, it is calculated the following way: ('plugin_buffer_size' / as) * dss. Where
+   'dss' is the default OS socket size and 'as' is the memory address size (4 bytes for
+   a 32 bit architecture, 8 bytes for 64 bit architectures, etc.).
+
+   'plugin_pipe_size': sets the circular queue size. If bufferization is also enabled,
+   this value has to be greater or equal to the buffer size. Values like 1MB (1024000),
+   2MB (2048000) or 4MB (4096000) are generally sufficient. 
+
+
+Q8: I want to to account both inbound and outbound traffic of my network, with an host
+    breakdown; how to do that in a savy fashion ? Do i need to run two daemon instances 
+    one per traffic direction ?
+A: No, you will be able to leverage the pluggable architecture of the daemons: you will
+   run a single daemon with two plugins attached to it; each of these will get part of
+   the traffic (aggregate_filter), either outbound or inbound. A sample config snippet
+   follows:
+
+   ...
+   aggregate[inbound]: dst_host
+   aggregate[outbound]: src_host
+   aggregate_filter[inbound]: dst net 192.168.0.0/16
+   aggregate_filter[outbound]: src net 192.168.0.0/16
+   plugins: mysql[inbound], mysql[outbound]
+   sql_table[inbound]: acct_in 
+   sql_table[outbound]: acct_out 
+   ... 
+
+   It will account all traffic directed to your network into the 'acct_in' table and
+   all traffic it generates into 'acct_out' table. Furthermore, if you actually need
+   totals (inbound plus outbound traffic), you will just need to play around with
+   basic SQL queries.
+
+   If you are only interested into having totals instead, you may alternatively use
+   the following piece of configuration:
+
+   ...
+   aggregate: sum_host
+   plugins: mysql
+   networks_file: /usr/local/pmacct/etc/networks.lst
+   ...
+
+   Where 'networks.lst' is a file where to define local network prefixes.
+
+
+Q9: I'm intimately fashioned by the idea of storing every single flow flying through my
+    network, before making up my mind what to do with such data: i basically would like
+    to aggregate my traffic as 'src_host, dst_host, src_port, dst_port, proto'. Is this
+    feasible without any filtering ?
+A: This is not adviceable. A simple reason being this would result in a huge matrix of
+   data, whose behaviour and size would be totally un-predictable over time (ie. impact
+   of port scans, DDoS, etc.). Nevertless, it remains a valid configuration.
+
+
+Q10: I use pmacctd. What portion of the packets is included into the bytes counter ?
+A: The portion of the packet accounted starts from the IPv4/IPv6 header (inclusive) and
+   ends with the last bit of the packet payload. This means that are excluded from the
+   accounting: packet preamble (if any), link layer headers (e.g. ethernet, llc, etc.),
+   MPLS stack length, VLAN tags size and trailing FCS (if any). This is the main reason
+   of skews reported while comparing pmacct counters to SNMP ones. However, by having
+   available a counter of packets, accounting for the missing portion is, in most cases,
+   a simple math exercise which depends on the underlying network architecture.
+   Example: Ethernet header = 14 bytes, Preamble+SFD (Start Frame Delimiter) = 8 bytes,
+   FCS (Framke Check Sequence) = 4 bytes. It results in an addition of a maximum of 26
+   bytes (14+8+4) for each packet. The use of VLANs will result in adding 4 more bytes
+   to the forementioned 26. 
+   If using an SQL plugin, starting from release 0.9.2, such adjustment can be achieved
+   directly within pmacct via the 'adjb' action (sql_preprocess).
+
+
+Q11: How to get the historical accounting enabled ? SQL table have a 'stamp_inserted'
+   and 'stamp_updated' fields but they remain empty.
+A: Historical accounting is easily enabled by adding to the SQL plugin configuration a
+   'sql_history' directive. Associate to it a 'sql_history_roundoff'. For examples and
+   syntax, refer to CONFIG-KEYS and EXAMPLES documents. 
+
+
+Q12: CLI is not enough to me. I would like to graph traffic data: how to do that?
+A: RRDtool, MRTG and GNUplot are just some tools which could be easily integrated with
+   pmacct operations. 'Memory plugin' is suitable as temporary storage and allows to
+   easily retrieve counters:
+ 
+   shell> ./pmacctd -D -c src_host -P memory -i eth0 
+   shell> ./pmacct -c src_host -N 192.168.4.133 -r
+   2339
+   shell>
+
+   Et voila'! This is the bytes counter. Because of the '-r', counters will get reset
+   or translating into the RRDTool jargon, each time you will get an 'ABSOLUTE' value.
+   Let's now encapsulate our query into, say, RRDtool commandline:
+
+   shell> rrdtool update 192_168_4_133.rrd N:`./pmacct -c src_host -N 192.168.4.133 -r`
+
+   Starting from 0.7.6, you will also be able to spawn as much as 4096 requests into a
+   single query; you may write your requests commandline (';' separated) but also read
+   them from a file (one per line):
+
+   shell> ./pmacct -c src_host,dst_host -N 192.168.4.133,192.168.0.101;192.168.4.5,192.168.4.1;... -r 
+   50905
+   1152
+   ...
+
+   OR 
+
+   shell> ./pmacct -c src_host,dst_host -N "file:queries.list" -r
+   ...
+
+   shell> cat queries.list
+   192.168.4.133,192.168.0.101
+   192.168.4.5,192.168.4.1
+   ...
+
+   Furthermore, SNMP is a widespreaded protocol used (and widely supported) in the IP
+   accounting field to gather IP traffic information by network devices. 'pmacct' may
+   also be easily connected to Net-SNMP extensible MIB. What follows is an example for
+   your 'snmpd.conf':
+
+   exec .1.3.6.1.4.1.2021.50 Description /usr/local/bin/pmacct -c src_host -N 192.168.4.133 -r 
+
+   Then, an 'snmpwalk' does the rest of the work:
+   shell> snmpwalk -v 1 localhost -c public .1.3.6.1.4.1.2021.50 
+   .1.3.6.1.4.1.2021.50.1.1 = 1
+   .1.3.6.1.4.1.2021.50.2.1 = "Description"
+   .1.3.6.1.4.1.2021.50.3.1 = "/usr/local/bin/pmacct -c src_host -N 192.168.4.133 -r"
+   .1.3.6.1.4.1.2021.50.100.1 = 0 
+   .1.3.6.1.4.1.2021.50.101.1 = "92984384"
+   .1.3.6.1.4.1.2021.50.102.1 = 0
+
+
+Q13: The network equipment i'm using supports sFlow but i don't know how to enable it.
+     I'm  unable to find any sflow-related command. What to do ?
+A: If you are unable to enable sFlow commandline, you have to resort to the SNMP way.
+   The sFlow MIB is documented into the RFC 3176; all you will need is to enable a SNMP
+   community with both read and write access. Then, continue using the sflowenable tool
+   available at the following URL: http://www.inmon.com/technology/sflowenable 
+
+
+Q14: I've configured the pmacct package in order to support IPv6 via the '--enable-ipv6'
+     switch. Now, when i launch either nfacctd or sfacctd i receive the following error
+     message: ERROR ( default/core ): socket() failed. What to do ? 
+A: When IPv6 code is enabled, sfacctd and nfacctd will try to fire up an IPv6 socket.
+   The error message is very likely to be caused by the proper kernel module not being
+   loaded. So, try either to load it or specify an IPv4 address to bind to. If using a
+   configuration file, add a line like 'nfacctd_ip: 192.168.0.14'; otherwise if going
+   commandline, use the following: 'nfacctd [ ... options ... ] -L 192.168.0.14'.  
+
+
+Q15: 32 bit counters are not large enough to me, in fact i see them rolling over and
+     returning inconsistent results. What to do ?
+A: pmacct >= 0.9.2 optionally supports 64 bits counters via a '--enable-64bit' switch
+   while configuring the package for compilation. It will affect all counters: bytes,
+   packets and flows. Use such switch only when required as 32 bits counters allow to
+   save some memory. Usually, overflowing counters are recognizable by unexpected
+   fluctuations in the counters value - caused, as said, by one or multiple rollovers. 
+ 
+
+Q16: SQL table versions, what they are -- why and when do i need them ? Also, can i
+     customize SQL tables ?
+A: pmacct tarball gets with so called 'default' tables (IP and BGP); they are built
+   by SQL scripts stored in the 'sql/' section of the tarball. Default tables enable
+   to start quickly with pmacct out-of-the-box; this doesn't imply they are suitable
+   as-is to larger installations. SQL table versioning is used to introduce features
+   over the time without breaking backward compatibility when upgrading pmacct. The
+   most updated guide on which version to use given a required feature-set can be,
+   once again, found in the 'sql/' section of the tarball.
+   SQL tables *can* be fully customized so that primitives of interest can be freely
+   mixed and matched - hence making a SQL table to perfectly adhere to the required
+   feature-set. This is achieved by setting the 'sql_optimize_clauses' configuration
+   key. You will then be responsible for building the custom schema and indexes.
+
+
+Q17: What is the best way to kill a running instance of pmacct avoiding data loss ?
+A: Two ways. a) Simply kill a specific plugin that you don't need anymore: you will
+   have to identify it and use the 'kill -INT <process number> command; b) kill the
+   whole pmacct instance: you can either use the 'killall -INT <daemon name>' command
+   or identify the Core Process and use the 'kill -INT <process number> command. All
+   of these, will do the job for you: will stop receiving new data from the network,
+   clear the memory buffers, notify the running plugins to take th exit lane (which
+   in turn will clear cached data as required).
+   To identify the Core Process you can either take a look to the process list (on
+   the Operating Systems where the setproctitle() call is supported by pmacct) or
+   use the 'pidfile' (-F) directive. Note also that shutting down nicely the daemon
+   improves restart turn-around times: the existing daemon will, first thing, close
+   its listening socket while the newly launched one will mostly take advantage of
+   the SO_REUSEADDR socket option. 
+
+
+Q18: I find interesting store network data in a SQL database. But i'm actually hitting
+     poor performances. Do you have any tips to improve/optimize things ?
+A: Few hints are summed below in order to improve SQL database performances. They are
+   not really tailored to a specific SQL engine but rather of general applicability.
+   Many thanks to Wim Kerkhoff for the many suggestions he contributed on this topic
+   over the time: 
+
+   * Keep the SQL schema lean: include only required fields, strip off all the others.
+     Set the 'sql_optimize_clauses' configuration key in order to flag pmacct you are
+     going to use a custom-built table.
+   * Avoid SQL UPDATEs as much as possible and use only INSERTs. This can be achieved
+     by setting the 'sql_dont_try_update' configuration key. A pre-condition is to let
+     sql_history == sql_refresh_time. UPDATEs are demanding in terms of resources and
+     are, for simplicity, enabled by default.
+   * If the previous point holds, then look for and enable database-specific directives
+     aimed to optimize performances ie. sql_multi_values for MySQL and sql_use_copy for
+     PostgreSQL.
+   * Don't rely automagically on standard indexes but enable optimal indexes based on
+     clauses you (by means of reports, 3rd party tools, scripts, etc.) and pmacct use
+     the most to SELECT data. Then remove every unused index.
+   * See if the dynamic table strategy offered by pmacct fits the bill: helps keeping
+     SQL tables and indexes of a manageable size by rotating SQL tables (ie. per hour,
+     day, week, etc.). See the 'sql_table_schema' configuration directive. 
+   * Run all SELECT and UPDATE queries under the "EXPLAIN ANALYZE ..." method to see
+     if they are actually hitting the indexes. If not, you need to build indexes that
+     better fit the actual scenario.
+   * Sometimes setting "SET enable_seqscan=no;" before a SELECT query can make a big
+     difference. Also don't underestimate the importance of daily VACUUM queries: 3-5
+     VACUUMs + 1 VACUUM FULL is generally a good idea. These tips hold for PostgreSQL.
+   * MyISAM is a lean SQL engine; if there is no concurrence, it might be preferred to
+     InnoDB. Lack of transactions can reveal painful in case of unsecured shutdowns,
+     requiring data recovery. This applies to MySQL only.
+   * Disabling fsync() does improve performance. This might have painful consequences
+     in case of unsecured shutdowns (remember power failure is a variable ...).
+
+
+Q19: I've configured the server hosting pmacct with my local timezone - which includes
+     DST (Daylight Saving Time). Is this allright?
+A: In general, it's good rule to run the backend part of any accounting system as UTC;
+   pmacct uses the underlying system clock, expecially in the SQL plugins to calculate
+   time-bins and scanner deadlines among the others. The use of timezones is supported
+   but not recommended. 
+
+/* EOF */
