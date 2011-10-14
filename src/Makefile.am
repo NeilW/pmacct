@@ -31,7 +31,7 @@ uacctd_SOURCES = uacctd.c signals.c util.c strlcpy.c plugin_hooks.c \
 	ports_aggr.c addr.c pretag.c pretag_handlers.c ip_flow.c setproctitle.c \
 	classifier.c regexp.c regsub.c conntrack.c xflow_status.c nl.c
 uacctd_LDFLAGS = $(DEFS) 
-uacctd_LDADD = $(pmacctd_PLUGINS)
+uacctd_LDADD = $(pmacctd_PLUGINS) $(NFLOG_LIBS)
 pmacct_SOURCES = pmacct.c strlcpy.c addr.c
 pmmyplay_SOURCES = pmmyplay.c strlcpy.c sql_handlers.c log_templates.c addr.c 
 pmpgplay_SOURCES = pmpgplay.c strlcpy.c sql_handlers.c log_templates.c addr.c 

@@ -43,3 +43,15 @@ EXT struct ifname_cache *hash_heads[IFCACHE_HASHSIZ];
 #undef EXT
 
 #endif
+#ifdef ENABLE_NFLOG
+
+/* Linux NetFilter NFLOG stuff */
+
+#include <libnetfilter_log/libnetfilter_log.h>
+
+#define NFLOG_BUFLEN 10480 /*should be enough room up to 9K Ethernet jumbo frames */
+#define DEFAULT_NFLOG_GROUP 0
+
+/* functions */
+
+#endif

@@ -43,7 +43,7 @@ int have_num_memory_pools; /* global getopt() stuff */
 pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
 u_char dummy_tlhdr[16];
 
-#ifdef ENABLE_ULOG
+#if defined(ENABLE_NFLOG) || defined(ENABLE_ULOG)
 
 /* Functions */
 void usage_daemon(char *prog_name)
@@ -84,19 +84,75 @@ void usage_daemon(char *prog_name)
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
 
+#ifdef ENABLE_NFLOG
+/* Callback function run by netfilter_log to process packet details */
+static int packet_dispatcher(struct nflog_g_handle *group_handle, 
+  struct nfgenmsg *nfmsg,
+  struct nflog_data *packet_data, 
+  void *data) 
+{
+  struct pcap_pkthdr hdr;
+  struct pcap_callback_data *cb_data = (struct pcap_callback_data *)data;
+  struct nfulnl_msg_packet_hw *packet_hw_addr;
+  char *packet_payload;
+  u_char jumbo_container[config.snaplen+ETHER_HDRLEN];
+
+  cb_data->ifindex_in = nflog_get_indev(packet_data);
+  cb_data->ifindex_out = nflog_get_outdev(packet_data);
+  if (nflog_get_timestamp(packet_data, &hdr.ts) <0) {
+    Log(LOG_DEBUG, "DEBUG: ( default/core ): no packet timestamp - using current time\n");
+    gettimeofday(&hdr.ts, NULL);
+  }
+  int header_len = nflog_get_payload(packet_data, &packet_payload);
+  if (header_len < 0) {
+    Log(LOG_ERR, "ERROR: ( default/core ): failed to retrieve packet data - skipping\n");
+    goto dispatcher_exit;
+  }
+  hdr.len = header_len;
+  hdr.caplen = MIN(header_len, config.snaplen);
+  Log(LOG_DEBUG, "DEBUG: indev=%u, outdev=%u, payload_len=%d, cap_len=%d \n", cb_data->ifindex_in, cb_data->ifindex_out, hdr.len, hdr.caplen);
+#if defined (HAVE_L2)
+  packet_hw_addr = nflog_get_packet_hw(packet_data);
+  memset(jumbo_container, 0, ETHER_HDRLEN);
+  if (packet_hw_addr == NULL) {
+    Log(LOG_DEBUG, "DEBUG: ( default/core ): no hardware address - using zeroed ethernet area\n");
+  } 
+  else {
+    Log(LOG_DEBUG, "DEBUG: ( default/core ): found ethernet address - copying\n");
+    memcpy(jumbo_container, packet_hw_addr->hw_addr, ETH_ADDR_LEN);
+  }
+  memcpy(jumbo_container+ETHER_HDRLEN, packet_payload, hdr.caplen);
+  hdr.caplen += ETHER_HDRLEN;
+  hdr.len += ETHER_HDRLEN;
+  switch (IP_V((struct my_iphdr *) packet_payload)) {
+  case 4:
+    Log(LOG_DEBUG, "DEBUG: ( default/core ): IPV4 packet\n");
+    ((struct eth_header *)jumbo_container)->ether_type = ntohs(ETHERTYPE_IP);
+    break;
+  case 6:
+    Log(LOG_DEBUG, "DEBUG: ( default/core ): IPV6 packet\n");
+    ((struct eth_header *)jumbo_container)->ether_type = ntohs(ETHERTYPE_IPV6);
+    break;
+  }
+  pcap_cb((u_char *) cb_data, &hdr, jumbo_container);
+#else
+  pcap_cb((u_char *) cb_data, &hdr, (const u_char *)packet_payload);
+#endif
+  dispatcher_exit:
+    return 0;
+}
+
+#endif
+
 
 int main(int argc,char **argv, char **envp)
 {
-  bpf_u_int32 localnet, netmask;  /* pcap library stuff */
-  struct bpf_program filter;
   struct pcap_device device;
-  char errbuf[PCAP_ERRBUF_SIZE];
   int index, logf;
 
   struct plugins_list_entry *list;
   struct plugin_requests req;
   char config_file[SRVBUFLEN];
-  int psize = ULOG_BUFLEN;
 
   struct id_table bpas_table;
   struct id_table blp_table;
@@ -111,8 +167,18 @@ int main(int argc,char **argv, char **envp)
   extern int optind, opterr, optopt;
   int errflag, cp; 
 
+#if defined(ENABLE_NFLOG)
+  /* NFLOG stuff */
+  int psize = NFLOG_BUFLEN;
+  struct nflog_handle *active_nflog_handle;
+  struct nflog_g_handle *active_nflog_group_handle;
+  char *nflog_buffer;
+  ssize_t len = 0;
+  int fd;
+#elif defined(ENABLE_ULOG)
   /* ULOG stuff */
   int ulog_fd, one = 1;
+  int psize = ULOG_BUFLEN;
   struct nlmsghdr *nlh;
   struct sockaddr_nl nls;
   ulog_packet_msg_t *ulog_pkt;
@@ -122,8 +188,10 @@ int main(int argc,char **argv, char **envp)
   struct pcap_pkthdr hdr;
   struct timeval tv;
 
-  char jumbo_container[10000];
+  char jumbo_container[config.snaplen+ETHER_HDRLEN];
   u_int8_t mac_len;
+
+#endif
 
 
 
@@ -318,6 +386,16 @@ int main(int argc,char **argv, char **envp)
     exit(1);
   }
 
+#if defined(ENABLE_NFLOG)
+  if (!config.uacctd_group) {
+    config.uacctd_group = DEFAULT_NFLOG_GROUP;
+    list = plugins_list;
+    while (list) {
+      list->cfg.uacctd_group = DEFAULT_NFLOG_GROUP;
+      list = list->next;
+    }
+  }
+#elif defined(ENABLE_ULOG)
   if (!config.uacctd_group) {
     config.uacctd_group = DEFAULT_ULOG_GROUP;
     list = plugins_list;
@@ -326,6 +404,7 @@ int main(int argc,char **argv, char **envp)
       list = list->next;
     }
   }
+#endif
 
   if (config.daemon) {
     list = plugins_list;
@@ -554,6 +633,57 @@ int main(int argc,char **argv, char **envp)
   signal(SIGUSR1, push_stats); /* logs various statistics via Log() calls */
   signal(SIGUSR2, reload_maps); /* sets to true the reload_maps flag */
   signal(SIGPIPE, SIG_IGN); /* we want to exit gracefully when a pipe is broken */
+#if defined(ENABLE_NFLOG)
+  active_nflog_handle = nflog_open();
+  if (!active_nflog_handle) {
+    Log(LOG_ERR, "ERROR ( default/core ): Netlink NFLOG: failed to obtain handle\n");
+    exit_all(1);
+  }
+  Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: obtained handle\n");
+  
+  if (nflog_unbind_pf(active_nflog_handle, AF_INET) < 0) {
+    Log(LOG_ERR, "ERROR ( default/core ): Netlink NFLOG: failed to clear existing AF_INET handler\n");
+    exit_all(1);
+  }
+  Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: cleared existing AF_INET handler\n");
+
+  if (nflog_bind_pf(active_nflog_handle, AF_INET) < 0) {
+    Log(LOG_ERR, "ERROR ( default/core ): Netlink NFLOG: failed to register as AF_INET handler\n");
+    exit_all(1);
+  }
+  Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: registered as AF_INET handler\n");
+
+  active_nflog_group_handle = nflog_bind_group(active_nflog_handle, config.uacctd_group);
+  if (!active_nflog_group_handle) {
+    Log(LOG_ERR, "ERROR ( default/core ): Netlink NFLOG: failed to bind to group %x\n", config.uacctd_group);
+    exit_all(1);
+  }
+  Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: bound to group %x\n", config.uacctd_group);
+
+  if (nflog_set_mode(active_nflog_group_handle, NFULNL_COPY_PACKET, 0xffff) < 0) {
+    Log(LOG_ERR, "ERROR ( default/core ): Netlink NFLOG: failed to set full packet copy mode\n");
+    exit_all(1);
+  }
+  Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: receiving full packet details\n");
+
+  if (config.uacctd_nl_size > NFLOG_BUFLEN) {
+    /* If configured buffer size is larger than default 4KB */
+    if (nflog_set_nlbufsiz(active_nflog_group_handle, config.uacctd_nl_size))
+      Log(LOG_ERR, "ERROR ( default/core ): Failed to set Netlink receive buffer size\n");
+    else
+      Log(LOG_INFO, "INFO ( default/core ): Netlink receive buffer size set to %u\n", config.uacctd_nl_size);
+  }
+
+  nflog_buffer = malloc(config.snaplen);
+  if (nflog_buffer == NULL) {
+    Log(LOG_ERR, "ERROR ( default/core ): NFLOG buffer malloc() failed\n");
+    exit_all(1);
+  }
+
+  nflog_callback_register(active_nflog_group_handle, &packet_dispatcher, &cb_data); 
+
+  Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: registered packet dispatcher callback - setup complete.\n");
+#elif defined(ENABLE_ULOG)
 
   ulog_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_NFLOG);
   if (ulog_fd == -1) {
@@ -594,6 +724,8 @@ int main(int argc,char **argv, char **envp)
     exit_all(1);
   }
   Log(LOG_INFO, "INFO ( default/core ): Netlink ULOG: binding to group %x\n", config.uacctd_group);
+
+#endif
 
   /* loading pre-tagging map, if any */
   if (config.pre_tag_map) {
@@ -691,6 +823,32 @@ int main(int argc,char **argv, char **envp)
   signal(SIGCHLD, handle_falling_child);
   kill(getpid(), SIGCHLD);
 
+#if defined(ENABLE_NFLOG)
+  /* Main loop: */
+
+  fd = nflog_fd(active_nflog_handle); 
+  
+  /* Turn off netlink errors from overrun. */
+  if (setsockopt(fd, SOL_NETLINK, NETLINK_NO_ENOBUFS, &one, sizeof(one)))
+    Log(LOG_ERR, "ERROR ( default/core ): Failed to turn off netlink ENOBUFS\n");
+
+  for (;;) {
+    len = recv(fd, nflog_buffer, config.snaplen, 0 );
+    if (len > 0) {
+      Log(LOG_DEBUG, "DEBUG ( default/core ): pkt received (len=%u)\n", len);
+      nflog_handle_packet(active_nflog_handle, nflog_buffer, len);
+    }
+    if (len == -1) {
+      if (errno != EAGAIN) {
+        /* We can't deal with permanent errors.
+         * Just sleep a bit.
+         */
+        Log(LOG_ERR, "ERROR ( default/core ): Syscall returned %d: %s. Sleeping for 1 sec.\n", errno, strerror(errno));
+        sleep(1);
+      }
+    }
+  }
+#elif defined(ENABLE_ULOG)
   /* Main loop: if pcap_loop() exits maybe an error occurred; we will try closing
      and reopening again our listening device */
   for (;;) {
@@ -770,8 +928,10 @@ int main(int argc,char **argv, char **envp)
       nlh = NLMSG_NEXT(nlh, len);
     }
   }
+#endif
 }
 
+#if defined(ENABLE_ULOG)
 unsigned int get_ifindex(char *device) 
 {
   static int sock = -1;
@@ -841,12 +1001,13 @@ unsigned int cache_ifindex(char *device, unsigned long now)
 
   return ifindex;
 }
+#endif
 
 #else
 
 int main(int argc,char **argv, char **envp)
 {
-  printf("WARN: uacctd (Linux NetFilter ULOG accounting) daemon is not active. This is enabled by --enable-ulog\n");
+  printf("WARN: uacctd (Linux NetFilter ULOG accounting) daemon is not active. This is enabled by --enable-nflog for NFLOG capture and --enable-ulog for ULOG capture\n");
 }
 
 #endif
