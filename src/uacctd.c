@@ -66,6 +66,7 @@ void usage_daemon(char *prog_name)
   printf("  -R  \tRenormalize sampled data\n");
   printf("  -g  \tNetlink ULOG group\n");
   printf("  -L  \tNetlink socket read buffer size\n");
+  printf("  -u  \tLeave IP protocols in numerical format\n");
   printf("\nMemory plugin (-P memory) options:\n");
   printf("  -p  \tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tNumber of buckets\n");
@@ -202,6 +203,10 @@ int main(int argc,char **argv, char **envp)
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
+    case 'u':
+      strlcpy(cfg_cmdline[rows], "print_num_protos: true", SRVBUFLEN);
+      rows++;
+      break;
     case 'f':
       strlcpy(config_file, optarg, sizeof(config_file));
       break;
@@ -295,6 +300,7 @@ int main(int argc,char **argv, char **envp)
   list = plugins_list;
   while (list) {
     list->cfg.acct_type = ACCT_PM;
+    set_default_preferences(&list->cfg);
     if (!strcmp(list->name, "default") && !strcmp(list->type.string, "core")) 
       memcpy(&config, &list->cfg, sizeof(struct configuration)); 
     list = list->next;
@@ -793,3 +799,12 @@ int main(int argc,char **argv, char **envp)
 }
 
 #endif
+
+/* Dummy objects here - ugly to see but well portable */
+void NF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+{
+}
+
+void SF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+{
+}

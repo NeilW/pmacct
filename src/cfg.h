@@ -51,6 +51,8 @@ struct configuration {
   int flow_hashsz;
   int conntrack_bufsz;
   int flow_lifetime;
+  int num_protos;
+  int num_hosts;
   char *imt_plugin_path;
   char *imt_plugin_passwd;
   char *sql_db;
@@ -155,6 +157,7 @@ struct configuration {
   pm_id_t post_tag;
   int ext_sampling_rate;
   int sampling_rate;
+  char *sampling_map;
   char *syslog;
   int debug;
   int snaplen;

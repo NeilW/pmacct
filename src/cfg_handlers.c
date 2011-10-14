@@ -1538,6 +1538,50 @@ int cfg_key_print_output(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_num_protos(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.num_protos = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.num_protos = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_num_hosts(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.num_hosts = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.num_hosts = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_post_tag(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1585,6 +1629,17 @@ int cfg_key_sampling_rate(char *filename, char *name, char *value_ptr)
       }
     }
   }
+
+  return changes;
+}
+
+int cfg_key_sampling_map(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.sampling_map = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'sampling_map'. Globalized.\n", filename);
 
   return changes;
 }
@@ -1847,6 +1902,10 @@ int cfg_key_nfacctd_bgp_peer_src_as_type(char *filename, char *name, char *value
   else if (!strncmp(value_ptr, "sflow", strlen("sflow"))) value = BGP_SRC_PRIMITIVES_KEEP;
   else if (!strncmp(value_ptr, "map", strlen("map"))) value = BGP_SRC_PRIMITIVES_MAP;
   else if (!strncmp(value_ptr, "bgp", strlen("bgp"))) value = BGP_SRC_PRIMITIVES_BGP;
+  else if (!strncmp(value_ptr, "fallback", strlen("fallback"))) {
+    value = BGP_SRC_PRIMITIVES_KEEP;
+    value |= BGP_SRC_PRIMITIVES_BGP;
+  }
   else Log(LOG_WARNING, "WARN ( %s ): Ignoring uknown 'bgp_peer_src_as_type' value.\n", filename);
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_peer_as_src_type = value;
@@ -2276,6 +2335,13 @@ int cfg_key_nfacctd_as_new(char *filename, char *name, char *value_ptr)
     value = NF_AS_NEW;
   else if (!strcmp(value_ptr, "bgp"))
     value = NF_AS_BGP;
+  else if (!strcmp(value_ptr, "fallback")) {
+    if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) { 
+      value = NF_AS_KEEP;
+      value |= NF_AS_BGP;
+    }
+    else value = NF_AS_BGP; /* NF_AS_KEEP does not apply to ACCT_PM and ACCT_UL */
+  }
   else {
     Log(LOG_ERR, "WARN ( %s ): Invalid AS aggregation value '%s'\n", filename, value_ptr);
     return ERR;
@@ -2300,6 +2366,13 @@ int cfg_key_nfacctd_net(char *filename, char *name, char *value_ptr)
     value = NF_NET_STATIC;
   else if (!strcmp(value_ptr, "bgp"))
     value = NF_NET_BGP;
+  else if (!strcmp(value_ptr, "fallback")) {
+    if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) {
+      value = NF_NET_KEEP;
+      value |= NF_NET_BGP;
+    }
+    else value = NF_NET_BGP;
+  }
   else {
     Log(LOG_ERR, "WARN ( %s ): Invalid network aggregation value '%s'\n", filename, value_ptr);
     return ERR;

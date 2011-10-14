@@ -20,11 +20,11 @@
 */
 
 /* defines */
-#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:R"
-#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:R"
-#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:O:wWL:R"
-#define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:O:Rg:L:"
-#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O"
+#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:uR"
+#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:uR"
+#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:O:uwWL:R"
+#define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:O:uRg:L:"
+#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:Ou"
 #define N_PRIMITIVES 47
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
@@ -58,13 +58,13 @@
 #define LARGEBUFLEN (8192+MOREBUFSZ)
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.14.0rc1"
-#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.14.0rc1"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.14.0rc1"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.14.0rc1"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.14.0rc1"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.14.0rc1"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.14.0rc1"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.14.0rc2"
+#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.14.0rc2"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.14.0rc2"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.14.0rc2"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.14.0rc2"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.14.0rc2"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.14.0rc2"
 
 #ifndef TRUE
 #define TRUE 1
@@ -96,6 +96,7 @@
 #define MAP_BGP_SRC_LOCAL_PREF	102	/* bgp_src_local_pref_map */
 #define MAP_BGP_SRC_MED		103	/* bgp_src_med_map */
 #define MAP_BGP_IS_SYMMETRIC    104	/* bgp_is_symmetric_map */
+#define MAP_SAMPLING		105	/* sampling_map */
 
 /* 47 primitives currently defined */
 #define COUNT_SRC_HOST		0x0000000000000001ULL
@@ -190,9 +191,9 @@
 #define CHLD_WARNING		0x00000001
 #define CHLD_ALERT		0x00000002
 
-#define BGP_SRC_PRIMITIVES_KEEP	0x00000000
-#define BGP_SRC_PRIMITIVES_MAP	0x00000001
-#define BGP_SRC_PRIMITIVES_BGP	0x00000002
+#define BGP_SRC_PRIMITIVES_KEEP	0x00000001
+#define BGP_SRC_PRIMITIVES_MAP	0x00000002
+#define BGP_SRC_PRIMITIVES_BGP	0x00000004
 
 #define PRINT_OUTPUT_FORMATTED	0x00000001
 #define PRINT_OUTPUT_CSV	0x00000002
@@ -216,14 +217,13 @@ typedef u_int64_t pm_counter_t;
 typedef u_int32_t pm_counter_t;
 #endif
 
-#if defined __PMACCTD_C || defined __UACCTD_C
-#define NF_AS_KEEP 0 
-#define NF_AS_NEW 1 
-#define NF_AS_BGP 2 
+#define NF_AS_COMPAT    0x00000000 /* Unused */
+#define NF_AS_KEEP	0x00000001 /* Keep AS numbers in Sflow or NetFlow packets */
+#define NF_AS_NEW 	0x00000002 /* ignore ASN from NetFlow and generate from network files */
+#define NF_AS_BGP	0x00000004 /* ignore ASN from NetFlow and generate from BGP peerings */
 
 #define NF_NET_COMPAT   0x00000000 /* Backward compatibility selection */
-#define NF_NET_KEEP     0x00000001 /* Determine IP network prefixes from NetFlow data */
+#define NF_NET_KEEP     0x00000001 /* Determine IP network prefixes from sFlow or NetFlow data */
 #define NF_NET_NEW      0x00000002 /* Determine IP network prefixes from network files */
 #define NF_NET_BGP      0x00000004 /* Determine IP network prefixes from BGP peerings */
 #define NF_NET_STATIC   0x00000008 /* Determine IP network prefixes from static mask */
-#endif

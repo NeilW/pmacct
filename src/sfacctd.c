@@ -70,6 +70,7 @@ void usage_daemon(char *prog_name)
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\ttLog to the specified syslog facility\n");
   printf("  -F  \tWrite Core Process PID into the specified file\n");
   printf("  -R  \tRenormalize sampled data\n");
+  printf("  -u  \tLeave IP protocols in numerical format\n");
   printf("\nMemory plugin (-P memory) options:\n");
   printf("  -p  \tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tNumber of buckets\n");
@@ -104,6 +105,7 @@ int main(int argc,char **argv, char **envp)
   struct id_table bmed_table;
   struct id_table biss_table;
   struct id_table bta_table;
+  struct id_table sampling_table;
   u_int32_t idx;
   u_int16_t ret;
   SFSample spp;
@@ -179,6 +181,7 @@ int main(int argc,char **argv, char **envp)
   memset(&bmed_table, 0, sizeof(bmed_table));
   memset(&biss_table, 0, sizeof(biss_table));
   memset(&bta_table, 0, sizeof(bta_table));
+  memset(&sampling_table, 0, sizeof(sampling_table));
   config.acct_type = ACCT_SF;
 
   rows = 0;
@@ -225,6 +228,10 @@ int main(int argc,char **argv, char **envp)
     case 'O':
       strlcpy(cfg_cmdline[rows], "print_output: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
+    case 'u':
+      strlcpy(cfg_cmdline[rows], "print_num_protos: true", SRVBUFLEN);
       rows++;
       break;
     case 'f':
@@ -310,6 +317,7 @@ int main(int argc,char **argv, char **envp)
   list = plugins_list;
   while(list) {
     list->cfg.acct_type = ACCT_SF;
+    set_default_preferences(&list->cfg);
     if (!strcmp(list->name, "default") && !strcmp(list->type.string, "core")) 
       memcpy(&config, &list->cfg, sizeof(struct configuration)); 
     list = list->next;
@@ -376,7 +384,7 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
-	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as == NF_AS_NEW) {
+	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as & NF_AS_NEW) {
 	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation was selected but NO 'networks_file' specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
@@ -502,6 +510,12 @@ int main(int argc,char **argv, char **envp)
     pptrs.v4.idtable = (u_char *) &idt;
   }
   else pptrs.v4.idtable = NULL;
+
+  if (config.sampling_map) {
+    load_id_file(MAP_SAMPLING, config.sampling_map, &sampling_table, &req, &sampling_map_allocated);
+    set_sampling_table(&pptrs, (u_char *) &sampling_table);
+  }
+  else set_sampling_table(&pptrs, NULL);
 
 #if defined ENABLE_THREADS
   /* starting the BGP thread */
@@ -770,6 +784,10 @@ int main(int argc,char **argv, char **envp)
         load_id_file(MAP_BGP_TO_XFLOW_AGENT, config.nfacctd_bgp_to_agent_map, &bta_table, &req, &bta_map_allocated);
       if (config.pre_tag_map)
         load_id_file(config.acct_type, config.pre_tag_map, &idt, &req, &tag_map_allocated);
+      if (config.sampling_map) {
+        load_id_file(MAP_SAMPLING, config.sampling_map, &sampling_table, &req, &sampling_map_allocated);
+        set_sampling_table(&pptrs, (u_char *) &sampling_table);
+      }
       reload_map = FALSE;
     }
 
@@ -2398,6 +2416,7 @@ void SF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_
   if (sample->agent_addr.type == SFLADDRESSTYPE_IP_V4) {
     for (x = 0; x < t->ipv4_num; x++) {
       if (t->e[x].agent_ip.a.address.ipv4.s_addr == sample->agent_addr.address.ip_v4.s_addr) {
+	t->e[x].last_matched = FALSE;
         for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
         if (id) {
           if (stop == PRETAG_MAP_RCODE_ID) {
@@ -2532,4 +2551,9 @@ char *sfv245_check_status(SFSample *spp, struct sockaddr *sa)
   }
 
   return (char *) entry;
+}
+
+/* Dummy objects here - ugly to see but well portable */
+void NF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+{
 }

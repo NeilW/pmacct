@@ -301,6 +301,10 @@ DESC:           defines the SQL table to use. Dynamic tables are supported throu
 		the 'acct_v4_1' table, and so on. The switch between the tables will happen each day at
 		midnight: this behaviour is ensured by the use of the 'sql_history_roundoff' directive. 
 
+		Ideally sql_refresh_time and sql_history values should be aligned for the dynamic tables
+		to work; sql_refresh_time with a value smaller than sql_history is also supported; whereas
+		the feature does not support values of sql_refresh_time greater than sql_history.
+
 		The maximum table name length is 64 characters. The maximum number of variables it may
 		contain is 8.
 
@@ -613,6 +617,20 @@ VALUES:		[ formatted | csv ]
 DESC:		Defines the print plugin output format. 'formatted' enables tabular output; 'csv' is to enable
 		comma-separated values format, suitable for injection into 3rd party tools. (default: formatted)
 
+KEY:            [ print_num_protos | sql_num_protos ]
+VALUES:         [true|false]
+DESC:		Defines whether IP protocols (ie. tcp, udp) should be looked up and presented in string format
+		or left numerical. The default is to look protocol names up. (default: false)
+
+KEY:            sql_num_hosts
+VALUES:         [true|false]
+DESC:           Defines whether IP addresses should be left numerical (in network bytes ordering) or converted
+		into human-readable strings. Applies to MySQL and SQLite plugins only and assumes the INET_NTOA()
+		function is defined in the RDBMS (which for MySQL is always the case, while for SQLite it is not
+		by default). Since INET_NTOA() is used, unless redefined to some custom-made variant, this feature
+		works for IPv4 addresses only. Default setting is to convert IP addresses into strings. (default:
+		false)
+
 KEY:		nfacctd_port (-l) [GLOBAL, NO_PMACCTD]
 DESC:		defines the UDP port where to bind the 'nfacctd' daemon (default: 2100). 
 
@@ -640,24 +658,24 @@ DESC:		makes 'nfacctd' to ignore timestamps included in NetFlow header and build
 		(default: false) 
 
 KEY:		[ nfacctd_as_new | sfacctd_as_new | pmacctd_as | uacctd_as ] [GLOBAL]
-VALUES:		[ false | (true|file) | bgp ]
+VALUES:		[ false | (true|file) | bgp | fallback ]
 DESC:		When 'false', it instructs [nf|sf]acctd to populate 'src_as', 'dst_as', 'peer_src_as' and
 		'peer_dst_as' from data within the NetFlow and sFlow datagram respectively; when 'true' ('file'
 		being an alias of 'true') it instructs [nf|sf]acctd to generate 'src_as' aand 'dst_as' (only!
 		ie. no peer-AS) ASNs by looking up source and destination IP addresses against a 'networks_file'
 		map. When 'bgp' is specified, ASNs are looked up against the BGP RIB of the peer from which the
-		NetFlow datagram was received. If not otherwise mapped via a bgp_agent_map directive, it is
-		assumed that: either BGP Source IP address or BGP RouterID equals to the sFlow/NetFlow source
-		IP address.
-		pmacctd and uacctd can't grasp ASNs from any protocol: 'false' (for backward compatibility),
-		'true' and 'file' expect a 'networks_file' to be defined. 'bgp' just works as described above.
-		Under nfacctd and sfacctd this feature also influences 'peer_src_ip' and 'peer_dst_ip': if
-		'false', 'true' or 'file' values are taken from NetFlow and sFlow datagrams respectively;
-		if 'bgp' values are looked up against the BGP RIB of the peer from which the NetFlow datagram
-		was received (or mapped to). (default: false) 
+		NetFlow datagram was received (see also bgp_agent_map directive). When 'fallback' is specified,
+		lookup is done against BGP first and, if not successful, against NetFlow/sFlow protocols.
+		As pmacctd and uacctd do not have an export protocol to look up ASNs against 'false' (maintained
+		for backward compatibility), 'true' and 'file' expect a 'networks_file' to be defined; 'bgp' just
+		works as described for [nf|sf]acctd; 'fallback' is mapped back to 'bgp' for the reason explained
+		above, no export protocol lookup available. Under nfacctd and sfacctd this feature also influences
+		'peer_src_ip' and 'peer_dst_ip': if 'false', 'true' or 'file' values are taken from NetFlow and
+		sFlow datagrams respectively; if 'bgp' values are looked up against the BGP RIB of the peer from
+		which the NetFlow datagram was received (or mapped to). (default: false) 
 
 KEY:            [ nfacctd_net | sfacctd_net | pmacctd_net | uacctd_net ]
-VALUES:         [ netflow | sflow | mask | file | bgp ]
+VALUES:         [ netflow | sflow | mask | file | bgp | fallback ]
 DESC:		Determines the source of data to perform network aggregation - directly influencing 'src_net',
 		'dst_net', 'src_mask' and 'dst_mask' primitives. 'netflow' and 'sflow' use netmask values
 		carried within NetFlow and sFlow protocols; valid only in conjunction with nfacctd and sfacctd.
@@ -665,8 +683,10 @@ DESC:		Determines the source of data to perform network aggregation - directly i
 		netmask values carried within BGP protocol. If this directive is not specified, the daemon
 		falls back to backward compatibility mode, hence enabling 'mask', if a networks_mask is
 		defined, and 'file', if a networks_file. If both are defined, the outcome will be the
-		intersection of their definitions. (default: nfacctd: 'netflow'; sfacctd: 'sflow'; pmacctd
-		and uacctd: 'mask', 'file')
+		intersection of their definitions. When 'fallback' is specified, in nfacctd and sfacctd lookup
+		is done against BGP first and, if not successful, against NetFlow/sFlow protocols; in pmacctd
+		and uacctd 'fallback' is mapped to 'bgp' since no export protocol lookup is available (default:
+		nfacctd: 'netflow'; sfacctd: 'sflow'; pmacctd and uacctd: 'mask', 'file')
 
 KEY:		[ nfacctd_mcast_groups | sfacctd_mcast_groups ] [GLOBAL, NO_PMACCTD]
 DESC:		defines one or more IPv4/IPv6 multicast groups to be joined by the daemon. If more groups are
@@ -743,6 +763,15 @@ DESC:		enables packet sampling. It expects a number which is the mean ratio of p
 		choices it offers: they will allow to deal with advanced sampling scenarios (e.g. probabilistic
 		methods). Finally, note that this 'sampling_rate' directive can be renormalized by using the 
 		'usrf' action of the 'sql_preprocess' layer. (default: no sampling)
+
+KEY:            sampling_map [GLOBAL, NO_PMACCTD, NO_UACCTD]
+DESC:           full pathname to a file containing traffic sampling mappings. It is mainly meant to be used
+		in conjunction with nfacctd and sfacctd for the purpose of fine-grained reporting of sampling
+		rates circumventing bugs and issues in router operating systems. Renormalization must be
+		enabled (nfacctd_renormalize or sfacctd_renormalize set to true) in order for the feature to
+		work. If a specific router is not defined in the map, the sampling rate advertised by the
+		router itself is applied. Take a look to the examples/ sub-tree 'sampling.map.example' for all
+		supported keys and detailed examples.
 
 KEY:		[ pmacctd_force_frag_handling | uacctd_force_frag_handling ] [GLOBAL, NO_NFACCTD]
 VALUES:		[true|false]

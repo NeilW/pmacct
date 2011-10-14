@@ -64,6 +64,7 @@ void usage_daemon(char *prog_name)
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\tLog to the specified syslog facility\n");
   printf("  -F  \tWrite Core Process PID into the specified file\n");
   printf("  -R  \tRenormalize sampled data\n");
+  printf("  -u  \tLeave IP protocols in numerical format\n");
   printf("\nMemory plugin (-P memory) options:\n");
   printf("  -p  \tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tNumber of buckets\n");
@@ -98,6 +99,7 @@ int main(int argc,char **argv, char **envp)
   struct id_table bmed_table;
   struct id_table biss_table;
   struct id_table bta_table;
+  struct id_table sampling_table;
   u_int32_t idx;
   u_int16_t ret;
 
@@ -142,6 +144,7 @@ int main(int argc,char **argv, char **envp)
   have_num_memory_pools = FALSE;
   reload_map = FALSE;
   tag_map_allocated = FALSE;
+  sampling_map_allocated = FALSE;
   bpas_map_allocated = FALSE;
   blp_map_allocated = FALSE;
   bmed_map_allocated = FALSE;
@@ -171,6 +174,7 @@ int main(int argc,char **argv, char **envp)
   memset(&bmed_table, 0, sizeof(bmed_table));
   memset(&biss_table, 0, sizeof(biss_table));
   memset(&bta_table, 0, sizeof(bta_table));
+  memset(&sampling_table, 0, sizeof(sampling_table));
   config.acct_type = ACCT_NF;
 
   rows = 0;
@@ -217,6 +221,10 @@ int main(int argc,char **argv, char **envp)
     case 'O':
       strlcpy(cfg_cmdline[rows], "print_output: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
+    case 'u':
+      strlcpy(cfg_cmdline[rows], "print_num_protos: true", SRVBUFLEN);
       rows++;
       break;
     case 'f':
@@ -302,6 +310,7 @@ int main(int argc,char **argv, char **envp)
   list = plugins_list;
   while(list) {
     list->cfg.acct_type = ACCT_NF;
+    set_default_preferences(&list->cfg);
     if (!strcmp(list->name, "default") && !strcmp(list->type.string, "core")) 
       memcpy(&config, &list->cfg, sizeof(struct configuration)); 
     list = list->next;
@@ -367,7 +376,7 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
-	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as == NF_AS_NEW) {
+	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as & NF_AS_NEW) {
 	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation selected but NO 'networks_file' specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
@@ -489,6 +498,12 @@ int main(int argc,char **argv, char **envp)
     pptrs.v4.idtable = (u_char *) &idt;
   }
   else pptrs.v4.idtable = NULL;
+
+  if (config.sampling_map) {
+    load_id_file(MAP_SAMPLING, config.sampling_map, &sampling_table, &req, &sampling_map_allocated);
+    set_sampling_table(&pptrs, (u_char *) &sampling_table);
+  }
+  else set_sampling_table(&pptrs, NULL);
 
 #if defined ENABLE_THREADS
   /* starting the BGP thread */
@@ -750,6 +765,10 @@ int main(int argc,char **argv, char **envp)
         load_id_file(MAP_BGP_TO_XFLOW_AGENT, config.nfacctd_bgp_to_agent_map, &bta_table, &req, &bta_map_allocated);
       if (config.pre_tag_map) 
         load_id_file(config.acct_type, config.pre_tag_map, &idt, &req, &tag_map_allocated); 
+      if (config.sampling_map) {
+        load_id_file(MAP_SAMPLING, config.sampling_map, &sampling_table, &req, &sampling_map_allocated);
+        set_sampling_table(&pptrs, (u_char *) &sampling_table);
+      }
       reload_map = FALSE;
     }
 
@@ -1121,18 +1140,30 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
       off += flowsetlen;
     }
     else if (tpl->template_type == 1) { /* Options coming */
-      struct xflow_status_entry *entry = (struct xflow_status_entry *) pptrs->f_status;
-      struct xflow_status_entry_sampling *sentry = NULL, *ssaved = NULL;
-      struct xflow_status_entry_class *centry = NULL, *csaved = NULL;
+      struct xflow_status_entry *entry;
+      struct xflow_status_entry_sampling *sentry, *ssaved;
+      struct xflow_status_entry_class *centry, *csaved;
 
       while (flowoff+tpl->len <= flowsetlen) {
+	entry = (struct xflow_status_entry *) pptrs->f_status;
+	sentry = NULL, ssaved = NULL;
+	centry = NULL, csaved = NULL;
+
 	/* Is this option about sampling? */
-	if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 1) {
-	  u_int8_t sampler_id = 0;
+	if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len || tpl->tpl[NF9_SAMPLING_INTERVAL].len == 4) {
+	  u_int8_t t8 = 0;
+	  u_int16_t sampler_id = 0, t16 = 0;
 
-	  memcpy(&sampler_id, pkt+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, 1);
+	  if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 1) {
+	    memcpy(&t8, pkt+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, 1);
+	    sampler_id = t8;
+	  }
+	  else if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 2) {
+	    memcpy(&sampler_id, pkt+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, 2);
+	    sampler_id = ntohs(t16);
+	  }
 
-	  if (entry) sentry = search_smp_id_status_table(entry->sampling, sampler_id);
+	  if (entry) sentry = search_smp_id_status_table(entry->sampling, sampler_id, FALSE);
 	  if (!sentry) sentry = create_smp_entry_status_table(entry);
 	  else ssaved = sentry->next;
 
@@ -1819,6 +1850,7 @@ void NF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_
   if (sa->sa_family == AF_INET) {
     for (x = 0; x < t->ipv4_num; x++) {
       if (t->e[x].agent_ip.a.address.ipv4.s_addr == ((struct sockaddr_in *)sa)->sin_addr.s_addr) {
+	t->e[x].last_matched = FALSE; 
         for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
         if (id) {
 	  if (stop == PRETAG_MAP_RCODE_ID) {
@@ -1915,4 +1947,9 @@ char *nfv9_check_status(struct packet_ptrs *pptrs, u_int32_t sid, u_int32_t seq)
   }
 
   return (char *) entry;
+}
+
+/* Dummy objects here - ugly to see but well portable */
+void SF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+{
 }

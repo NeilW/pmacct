@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
 */
 
 /*
@@ -343,6 +343,7 @@ void PM_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_
   if (tag) *tag = 0;
   if (tag2) *tag2 = 0;
   for (x = 0; x < t->ipv4_num; x++) {
+    t->e[x].last_matched = FALSE;
     for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
     if (id) {
       if (stop == PRETAG_MAP_RCODE_ID) {
