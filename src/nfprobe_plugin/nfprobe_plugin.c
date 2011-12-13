@@ -1004,8 +1004,8 @@ static void flow_cb(u_char *user_data, struct pkt_data *data, struct pkt_extras 
   struct CB_CTXT *cb_ctxt = (struct CB_CTXT *)user_data;
   struct timeval tv;
 
-  tv.tv_sec = data->time_start;
-  tv.tv_usec = 0; /* XXX */ 
+  tv.tv_sec = data->time_start.tv_sec;
+  tv.tv_usec = data->time_start.tv_usec; 
   if (process_packet(cb_ctxt->ft, data, extras, &tv) == PP_MALLOC_FAIL) cb_ctxt->fatal = 1;
 }
 
@@ -1289,6 +1289,11 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "Netflow Probe Plugin", config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
+  if (config.logfile) {
+    fclose(config.logfile_fd);
+    config.logfile_fd = open_logfile(config.logfile);
+  }
+
   Log(LOG_INFO, "INFO ( %s/%s ): NetFlow probe plugin is originally based on softflowd 0.9.7 software, Copyright 2002 Damien Miller <djm@mindrot.org> All rights reserved.\n",
 		  config.name, config.type);
 

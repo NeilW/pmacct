@@ -176,6 +176,9 @@ static const struct _protocols_struct _protocols[] = {
 
 #if defined __PMACCTD_C || defined __UACCTD_C
 static struct _devices_struct _devices[] = {
+#if defined DLT_LOOP
+  {null_handler, DLT_LOOP},
+#endif
   {null_handler, DLT_NULL},
   {eth_handler, DLT_EN10MB},
   {ppp_handler, DLT_PPP},
@@ -218,6 +221,7 @@ static const struct _dictionary_line dictionary[] = {
   {"uacctd_net", cfg_key_nfacctd_net},
   {"plugins", NULL},
   {"plugin_pipe_size", cfg_key_plugin_pipe_size},
+  {"plugin_pipe_backlog", cfg_key_plugin_pipe_backlog},
   {"plugin_buffer_size", cfg_key_plugin_buffer_size},
   {"interface", cfg_key_interface},
   {"interface_wait", cfg_key_interface_wait},
@@ -272,6 +276,9 @@ static const struct _dictionary_line dictionary[] = {
   {"print_markers", cfg_key_print_markers},
   {"print_output", cfg_key_print_output},
   {"print_num_protos", cfg_key_num_protos},
+  {"print_time_roundoff", cfg_key_sql_history_roundoff},
+  {"print_output_file", cfg_key_sql_table},
+  {"print_trigger_exec", cfg_key_sql_trigger_exec},
   {"nfacctd_port", cfg_key_nfacctd_port},
   {"nfacctd_ip", cfg_key_nfacctd_ip},
   {"nfacctd_allow_file", cfg_key_nfacctd_allow_file},
@@ -358,7 +365,6 @@ static const struct _dictionary_line dictionary[] = {
   {"bgp_peer_src_as_map", cfg_key_nfacctd_bgp_peer_src_as_map},
   {"bgp_src_local_pref_map", cfg_key_nfacctd_bgp_src_local_pref_map},
   {"bgp_src_med_map", cfg_key_nfacctd_bgp_src_med_map},
-  {"bgp_is_symmetric_map", cfg_key_nfacctd_bgp_is_symmetric_map},
   {"bgp_peer_src_as_type", cfg_key_nfacctd_bgp_peer_src_as_type},
   {"bgp_src_std_comm_type", cfg_key_nfacctd_bgp_src_std_comm_type},
   {"bgp_src_ext_comm_type", cfg_key_nfacctd_bgp_src_ext_comm_type},
@@ -366,6 +372,7 @@ static const struct _dictionary_line dictionary[] = {
   {"bgp_src_local_pref_type", cfg_key_nfacctd_bgp_src_local_pref_type},
   {"bgp_src_med_type", cfg_key_nfacctd_bgp_src_med_type},
   {"bgp_agent_map", cfg_key_nfacctd_bgp_to_agent_map},
+  {"bgp_iface_rd_map", cfg_key_nfacctd_bgp_iface_to_rd_map},
   {"bgp_follow_default", cfg_key_nfacctd_bgp_follow_default},
   {"bgp_follow_nexthop", cfg_key_nfacctd_bgp_follow_nexthop},
   {"bgp_neighbors_file", cfg_key_nfacctd_bgp_neighbors_file},

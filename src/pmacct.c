@@ -25,20 +25,24 @@
 #include "pmacct.h"
 #include "pmacct-data.h"
 #include "imt_plugin.h"
+#include "bgp/bgp_packet.h"
+#include "bgp/bgp.h"
 
 /* prototypes */
 int Recv(int, unsigned char **);
-int sanitize_buf(char *);
-void trim_all_spaces(char *);
 void print_ex_options_error();
 void write_status_header_formatted();
 void write_status_header_csv();
 void write_class_table_header();
-char *extract_token(char **, int);
 int CHECK_Q_TYPE(int);
 int check_data_sizes(struct query_header *, struct pkt_data *);
 void client_counters_merge_sort(void *, int, int, int, int);
 void client_counters_merge(void *, int, int, int, int, int);
+int pmc_sanitize_buf(char *);
+void pmc_trim_all_spaces(char *);
+char *pmc_extract_token(char **, int);
+int pmc_bgp_rd2str(char *, rd_t *);
+int pmc_bgp_str2rd(rd_t *, char *);
 
 /* functions */
 int CHECK_Q_TYPE(int type)
@@ -63,7 +67,7 @@ void usage_client(char *prog)
   printf("  -S\tSum counters instead of returning a single counter for each request (applies to -N)\n");
   printf("  -M\t[matching data[';' ... ]] | ['file:'[filename]] \n\tMatch primitives; print formatted table (requires -c)\n");
   printf("  -a\tDisplay all table fields (even those currently unused)\n");
-  printf("  -c\t[ src_mac | dst_mac | vlan | cos | src_host | dst_host | src_net | dst_net | src_mask | dst_mask | \n\t src_port | dst_port | tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | \n\t sum_port | in_iface | out_iface | tag | tag2 | flows | class | std_comm | ext_comm | as_path | \n\t peer_src_ip | peer_dst_ip | peer_src_as | peer_dst_as | src_as_path | src_std_comm | src_med | \n\t src_ext_comm | src_local_pref | is_symmetric ] \n\tSelect primitives to match (required by -N and -M)\n");
+  printf("  -c\t[ src_mac | dst_mac | vlan | cos | src_host | dst_host | src_net | dst_net | src_mask | dst_mask | \n\t src_port | dst_port | tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | \n\t sum_port | in_iface | out_iface | tag | tag2 | flows | class | std_comm | ext_comm | as_path | \n\t peer_src_ip | peer_dst_ip | peer_src_as | peer_dst_as | src_as_path | src_std_comm | src_med | \n\t src_ext_comm | src_local_pref | mpls_vpn_rd ] \n\tSelect primitives to match (required by -N and -M)\n");
   printf("  -T\t[bytes|packets|flows] \n\tOutput top N statistics (applies to -M and -s)\n");
   printf("  -e\tClear statistics\n");
   printf("  -r\tReset counters (applies to -N and -M)\n");
@@ -79,11 +83,11 @@ void usage_client(char *prog)
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
 
-int sanitize_buf(char *buf)
+int pmc_sanitize_buf(char *buf)
 {
   int x = 0, valid_char = 0;
 
-  trim_all_spaces(buf);
+  pmc_trim_all_spaces(buf);
   while (x < strlen(buf)) {
     if (!isspace(buf[x])) valid_char++;
     x++;
@@ -94,7 +98,7 @@ int sanitize_buf(char *buf)
   return FALSE;
 }
 
-void trim_all_spaces(char *buf)
+void pmc_trim_all_spaces(char *buf)
 {
   int i = 0, len;
 
@@ -198,7 +202,6 @@ void write_stats_header_formatted(u_int64_t what_to_count, u_int8_t have_wtc)
     if (what_to_count & COUNT_SRC_LOCAL_PREF) printf("SRC_PREF ");
     if (what_to_count & COUNT_MED) printf("MED     ");
     if (what_to_count & COUNT_SRC_MED) printf("SRC_MED ");
-    if (what_to_count & COUNT_IS_SYMMETRIC) printf("SYM  ");
     if (what_to_count & COUNT_PEER_SRC_AS) printf("PEER_SRC_AS ");
     if (what_to_count & COUNT_PEER_DST_AS) printf("PEER_DST_AS ");
 #if defined ENABLE_IPV6
@@ -208,6 +211,7 @@ void write_stats_header_formatted(u_int64_t what_to_count, u_int8_t have_wtc)
     if (what_to_count & COUNT_PEER_SRC_IP) printf("PEER_SRC_IP      ");
     if (what_to_count & COUNT_PEER_DST_IP) printf("PEER_DST_IP      ");
 #endif
+    if (what_to_count & COUNT_MPLS_VPN_RD) printf("MPLS_VPN_RD         ");
 #if defined ENABLE_IPV6
     if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) printf("SRC_IP                                         "); 
     if (what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET)) printf("SRC_IP                                         ");
@@ -318,7 +322,6 @@ void write_stats_header_csv(u_int64_t what_to_count, u_int8_t have_wtc)
     if (what_to_count & COUNT_SRC_LOCAL_PREF) printf("SRC_PREF,");
     if (what_to_count & COUNT_MED) printf("MED,");
     if (what_to_count & COUNT_SRC_MED) printf("SRC_MED,");
-    if (what_to_count & COUNT_IS_SYMMETRIC) printf("SYM,");
     if (what_to_count & COUNT_PEER_SRC_AS) printf("PEER_SRC_AS,");
     if (what_to_count & COUNT_PEER_DST_AS) printf("PEER_DST_AS,");
 #if defined ENABLE_IPV6
@@ -328,6 +331,7 @@ void write_stats_header_csv(u_int64_t what_to_count, u_int8_t have_wtc)
     if (what_to_count & COUNT_PEER_SRC_IP) printf("PEER_SRC_IP,");
     if (what_to_count & COUNT_PEER_DST_IP) printf("PEER_DST_IP,");
 #endif
+    if (what_to_count & COUNT_MPLS_VPN_RD) printf("MPLS_VPN_RD,");
 #if defined ENABLE_IPV6
     if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) printf("SRC_IP,"); 
     if (what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET)) printf("SRC_IP,");
@@ -411,7 +415,7 @@ int main(int argc,char **argv)
   char clibuf[clibufsz], *bufptr;
   unsigned char *largebuf, *elem, *ct;
   char ethernet_address[18], ip_address[INET6_ADDRSTRLEN];
-  char path[128], file[128], password[9];
+  char path[128], file[128], password[9], rd_str[SRVBUFLEN];
   char *as_path, empty_aspath[] = "^$", *bgp_comm;
   int sd, buflen, unpacked, printed;
   int counter=0, ct_idx=0, ct_num=0;
@@ -476,7 +480,7 @@ int main(int argc,char **argv)
       strlcpy(count, optarg, sizeof(count));
       count_ptr = count;
       while ((*count_ptr != '\0') && (count_index <= N_PRIMITIVES-1)) {
-        count_token[count_index] = extract_token(&count_ptr, ',');
+        count_token[count_index] = pmc_extract_token(&count_ptr, ',');
 	if (!strcmp(count_token[count_index], "src_host")) {
 	  count_token_int[count_index] = COUNT_SRC_HOST;
 	  what_to_count |= COUNT_SRC_HOST;
@@ -631,10 +635,6 @@ int main(int argc,char **argv)
           count_token_int[count_index] = COUNT_SRC_MED;
           what_to_count |= COUNT_SRC_MED;
         }
-	else if (!strcmp(count_token[count_index], "is_symmetric")) {
-	  count_token_int[count_index] = COUNT_IS_SYMMETRIC;
-	  what_to_count |= COUNT_IS_SYMMETRIC;
-	}
         else if (!strcmp(count_token[count_index], "peer_src_as")) {
           count_token_int[count_index] = COUNT_PEER_SRC_AS;
           what_to_count |= COUNT_PEER_SRC_AS;
@@ -650,6 +650,10 @@ int main(int argc,char **argv)
         else if (!strcmp(count_token[count_index], "peer_dst_ip")) {
           count_token_int[count_index] = COUNT_PEER_DST_IP;
           what_to_count |= COUNT_PEER_DST_IP;
+        }
+        else if (!strcmp(count_token[count_index], "mpls_vpn_rd")) {
+          count_token_int[count_index] = COUNT_MPLS_VPN_RD;
+          what_to_count |= COUNT_MPLS_VPN_RD;
         }
         else printf("WARN: ignoring unknown aggregation method: %s.\n", count_token[count_index]);
 	what_to_count |= COUNT_COUNTERS; /* we always count counters ;-) */
@@ -818,7 +822,7 @@ int main(int argc,char **argv)
 	strnum = 0;
 	while (!feof(f) && (strnum < MAX_QUERIES)) {
 	  if (fgets(tmpstr, SRVBUFLEN, f)) { 
-	    if (!sanitize_buf(tmpstr)) strnum++;
+	    if (!pmc_sanitize_buf(tmpstr)) strnum++;
 	  }
 	}
       }
@@ -858,7 +862,7 @@ int main(int argc,char **argv)
       while (!feof(f) && (strnum < MAX_QUERIES)) {
         if (fgets(tmpbufptr, SRVBUFLEN, f)) {
 	  tmpbufptr[SRVBUFLEN-1] = '\0';
-	  if (!sanitize_buf(tmpbufptr)) {
+	  if (!pmc_sanitize_buf(tmpbufptr)) {
 	    strings[strnum] = tmpbufptr;
 	    strnum++;
 	    tmpbufptr += SRVBUFLEN;
@@ -880,7 +884,7 @@ int main(int argc,char **argv)
       memset(&request, 0, sizeof(struct query_entry));
       request.what_to_count = what_to_count;
       while ((*match_string_ptr != '\0') && (match_string_index < count_index))  {
-        match_string_token = extract_token(&match_string_ptr, ',');
+        match_string_token = pmc_extract_token(&match_string_ptr, ',');
 
 	/* Handling wildcards meaningfully */
 	if (!strcmp(match_string_token, "*")) {
@@ -1017,14 +1021,14 @@ int main(int argc,char **argv)
 	  char *endptr = NULL;
 	  u_int32_t value;
 
-	  value = strtoul(match_string_token, &endptr, 10);
+	  value = strtoull(match_string_token, &endptr, 10);
 	  request.data.id = value; 
 	}
         else if (!strcmp(count_token[match_string_index], "tag2")) {
           char *endptr = NULL;
           u_int32_t value;
 
-          value = strtoul(match_string_token, &endptr, 10);
+          value = strtoull(match_string_token, &endptr, 10);
           request.data.id2 = value;
         }
         else if (!strcmp(count_token[match_string_index], "class")) {
@@ -1163,11 +1167,6 @@ int main(int argc,char **argv)
 
           request.pbgp.src_med = strtoul(match_string_token, &endptr, 10);
         }
-	else if (!strcmp(count_token[match_string_index], "is_symmetric")) {
-	  char *endptr;
-
-	  request.pbgp.is_symmetric = strtoul(match_string_token, &endptr, 10);
-	}
         else if (!strcmp(count_token[match_string_index], "peer_src_as")) {
           char *endptr;
 
@@ -1187,6 +1186,12 @@ int main(int argc,char **argv)
         else if (!strcmp(count_token[match_string_index], "peer_dst_ip")) {
           if (!str_to_addr(match_string_token, &request.pbgp.peer_dst_ip)) {
             printf("ERROR: peer_dst_ip: Invalid IP address: '%s'\n", match_string_token);
+            exit(1);
+          }
+        }
+        else if (!strcmp(count_token[match_string_index], "mpls_vpn_rd")) {
+	  if (!pmc_bgp_str2rd((rd_t *) &request.pbgp.mpls_vpn_rd, match_string_token)) {
+            printf("ERROR: mpls_vpn_rd: Invalid MPLS VPN RD value: '%s'\n", match_string_token);
             exit(1);
           }
         }
@@ -1247,7 +1252,7 @@ int main(int argc,char **argv)
     if (what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                          COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
 			 COUNT_SRC_AS_PATH|COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_MED|
-			 COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC))
+			 COUNT_SRC_LOCAL_PREF|COUNT_MPLS_VPN_RD))
       PbgpSz = TRUE;
 
     if (want_output == PRINT_OUTPUT_FORMATTED)
@@ -1283,13 +1288,13 @@ int main(int argc,char **argv)
       if (memcmp(&acc_elem, &empty_addr, sizeof(struct pkt_primitives)) != 0 || 
 	  memcmp(pbgp, &empty_pbgp, sizeof(struct pkt_bgp_primitives)) != 0) {
         if (!have_wtc || (what_to_count & COUNT_ID)) {
-	  if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-10u  ", acc_elem->primitives.id);
-	  else if (want_output == PRINT_OUTPUT_CSV) printf("%u,", acc_elem->primitives.id);
+	  if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-10llu  ", acc_elem->primitives.id);
+	  else if (want_output == PRINT_OUTPUT_CSV) printf("%llu,", acc_elem->primitives.id);
 	}
 
         if (!have_wtc || (what_to_count & COUNT_ID2)) {
-	  if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-10u  ", acc_elem->primitives.id2);
-	  else if (want_output == PRINT_OUTPUT_CSV) printf("%u,", acc_elem->primitives.id2);
+	  if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-10llu  ", acc_elem->primitives.id2);
+	  else if (want_output == PRINT_OUTPUT_CSV) printf("%llu,", acc_elem->primitives.id2);
 	}
 
         if (!have_wtc || (what_to_count & COUNT_CLASS)) {
@@ -1419,7 +1424,7 @@ int main(int argc,char **argv)
 	  }
 	  else {
 	    if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-22s   ", empty_aspath); 
-	    else if (want_output == PRINT_OUTPUT_CSV) printf("%s,", empty_aspath); 
+	    else if (want_output == PRINT_OUTPUT_CSV) printf("%s,", pbgp->as_path); 
 	  }
         }
 
@@ -1458,11 +1463,6 @@ int main(int argc,char **argv)
           if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-6u  ", pbgp->src_med);
           else if (want_output == PRINT_OUTPUT_CSV) printf("%u,", pbgp->src_med);
         }
-
-	if (!have_wtc || (what_to_count & COUNT_IS_SYMMETRIC)) {
-	  if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-3u  ", pbgp->is_symmetric);
-	  else if (want_output == PRINT_OUTPUT_CSV) printf("%u,", pbgp->is_symmetric);
-	}
 
         if (!have_wtc || (what_to_count & COUNT_PEER_SRC_AS)) {
           if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-10u  ", pbgp->peer_src_as);
@@ -1521,6 +1521,13 @@ int main(int argc,char **argv)
           }
 #endif
         }
+
+        if (!have_wtc || (what_to_count & COUNT_MPLS_VPN_RD)) {
+          pmc_bgp_rd2str(rd_str, (rd_t *) &pbgp->mpls_vpn_rd);
+
+          if (want_output == PRINT_OUTPUT_FORMATTED) printf("%-18s  ", rd_str);
+          else if (want_output == PRINT_OUTPUT_CSV) printf("%s,", rd_str);
+	}
 
 	if (!have_wtc || (what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST|
 					   COUNT_SRC_NET|COUNT_SUM_NET))) {
@@ -1683,7 +1690,7 @@ int main(int argc,char **argv)
 	pcnt += acc_elem->pkt_num;
 	fcnt += acc_elem->flo_num;
 	bcnt += acc_elem->pkt_len;
-	num_counters += acc_elem->time_start; /* XXX: this field is used here to count how much entries we are accumulating */
+	num_counters += acc_elem->time_start.tv_sec; /* XXX: this field is used here to count how much entries we are accumulating */
       }
       else {
 #if defined HAVE_64BIT_COUNTERS
@@ -1692,13 +1699,13 @@ int main(int argc,char **argv)
 	/* print packets */
 	else if (which_counter == 1) printf("%llu\n", acc_elem->pkt_num); 
 	/* print packets+bytes+flows+num */
-	else if (which_counter == 2) printf("%llu %llu %llu %lu\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num, acc_elem->time_start);
+	else if (which_counter == 2) printf("%llu %llu %llu %lu\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num, acc_elem->time_start.tv_sec);
 	/* print flows */
 	else if (which_counter == 3) printf("%llu\n", acc_elem->flo_num);
 #else
         if (which_counter == 0) printf("%lu\n", acc_elem->pkt_len); 
         else if (which_counter == 1) printf("%lu\n", acc_elem->pkt_num); 
-        else if (which_counter == 2) printf("%lu %lu %lu %lu\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num, acc_elem->time_start); 
+        else if (which_counter == 2) printf("%lu %lu %lu %lu\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num, acc_elem->time_start.tv_sec); 
         else if (which_counter == 3) printf("%lu\n", acc_elem->flo_num); 
 #endif
       }
@@ -1746,7 +1753,7 @@ int main(int argc,char **argv)
   return 0;
 }
 
-char *extract_token(char **string, int delim)
+char *pmc_extract_token(char **string, int delim)
 {
   char *token, *delim_ptr;
 
@@ -1938,4 +1945,111 @@ void client_counters_merge(void *table, int start, int middle, int end, int size
 
   free(v1);
   free(v2);
+}
+
+int pmc_bgp_rd2str(char *str, rd_t *rd)
+{
+  struct rd_ip  *rdi;
+  struct rd_as  *rda;
+  struct rd_as4 *rda4;
+  struct host_addr a;
+  u_char ip_address[INET6_ADDRSTRLEN];
+
+  switch (rd->type) {
+  case RD_TYPE_AS:
+    rda = (struct rd_as *) rd;
+    sprintf(str, "%u:%u:%u", rda->type, rda->as, rda->val);
+    break;
+  case RD_TYPE_IP:
+    rdi = (struct rd_ip *) rd;
+    a.family = AF_INET;
+    a.address.ipv4.s_addr = rdi->ip.s_addr;
+    addr_to_str(ip_address, &a);
+    sprintf(str, "%u:%s:%u", rdi->type, ip_address, rdi->val);
+    break;
+  case RD_TYPE_AS4:
+    rda4 = (struct rd_as4 *) rd;
+    sprintf(str, "%u:%u:%u", rda4->type, rda4->as, rda4->val);
+    break;
+  default:
+    sprintf(str, "unknown");
+    break;
+  }
+}
+
+int pmc_bgp_str2rd(rd_t *output, char *value)
+{
+  struct host_addr a;
+  char *endptr, *token;
+  u_int32_t tmp32;
+  u_int16_t tmp16;
+  struct rd_ip  *rdi;
+  struct rd_as  *rda;
+  struct rd_as4 *rda4;
+  int idx = 0;
+  rd_t rd;
+
+  memset(&a, 0, sizeof(a));
+  memset(&rd, 0, sizeof(rd));
+
+  /* type:RD_subfield1:RD_subfield2 */
+  while ( (token = pmc_extract_token(&value, ':')) && idx < 3) {
+    if (idx == 0) {
+      tmp32 = strtoul(token, &endptr, 10);
+      rd.type = tmp32;
+      switch (rd.type) {
+      case RD_TYPE_AS:
+        rda = (struct rd_as *) &rd;
+        break;
+      case RD_TYPE_IP:
+        rdi = (struct rd_ip *) &rd;
+        break;
+      case RD_TYPE_AS4:
+        rda4 = (struct rd_as4 *) &rd;
+        break;
+      default:
+        printf("ERROR: Invalid RD type specified\n");
+        return FALSE;
+      }
+    }
+    if (idx == 1) {
+      switch (rd.type) {
+      case RD_TYPE_AS:
+        tmp32 = strtoul(token, &endptr, 10);
+        rda->as = tmp32;
+        break;
+      case RD_TYPE_IP:
+        memset(&a, 0, sizeof(a));
+        str_to_addr(token, &a);
+        if (a.family == AF_INET) rdi->ip.s_addr = a.address.ipv4.s_addr;
+        break;
+      case RD_TYPE_AS4:
+        tmp32 = strtoul(token, &endptr, 10);
+        rda4->as = tmp32;
+        break;
+      }
+    }
+    if (idx == 2) {
+      switch (rd.type) {
+      case RD_TYPE_AS:
+        tmp32 = strtoul(token, &endptr, 10);
+        rda->val = tmp32;
+        break;
+      case RD_TYPE_IP:
+        tmp32 = strtoul(token, &endptr, 10);
+        rdi->val = tmp32;
+        break;
+      case RD_TYPE_AS4:
+        tmp32 = strtoul(token, &endptr, 10);
+        rda4->val = tmp32;
+        break;
+      }
+    }
+
+    idx++;
+  }
+
+  memcpy(output, &rd, sizeof(rd));
+
+  return TRUE;
 }

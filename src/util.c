@@ -367,24 +367,40 @@ FILE *open_logfile(char *filename)
   if (config.files_gid) group = config.files_gid;
 
   file = fopen(filename, "a"); 
+  if (file) chown(filename, owner, group); 
+  else {
+    printf("ERROR: Unable to open logfile '%s'\n", filename);
+    file = NULL;
+  }
+
+  return file;
+}
+
+FILE *open_print_output_file(char *filename, time_t now)
+{
+  char buf[LARGEBUFLEN];
+  FILE *file = NULL;
+  struct tm *tmnow;
+  uid_t owner = -1;
+  gid_t group = -1;
+
+  if (config.files_uid) owner = config.files_uid;
+  if (config.files_gid) group = config.files_gid;
+
+  tmnow = localtime(&now);
+  strftime(buf, LARGEBUFLEN, filename, tmnow);
+
+  file = fopen(buf, "w");
   if (file) {
-    chown(filename, owner, group);
+    chown(buf, owner, group);
     if (file_lock(fileno(file))) {
-      Log(LOG_ALERT, "ALERT: Unable to obtain lock for logfile '%s'.\n", filename);
+      Log(LOG_ALERT, "ALERT: Unable to obtain lock for print_ouput_file '%s'.\n", buf);
       file = NULL;
     }
   }
   else {
-    Log(LOG_ERR, "ERROR: Unable to open logfile '%s'\n", filename);
+    Log(LOG_ERR, "ERROR: Unable to open print_ouput_file '%s'\n", buf);
     file = NULL;
-  }
-
-  if (file) {
-    now = time(NULL);
-    tmnow = localtime(&now);
-    strftime(timebuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S" , tmnow);
-    fprintf(file, "\n\n=== Start logging: %s ===\n\n", timebuf); 
-    fflush(file);
   }
 
   return file;

@@ -169,12 +169,12 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "src_ext_comm")) value |= COUNT_SRC_EXT_COMM;
     else if (!strcmp(count_token, "src_local_pref")) value |= COUNT_SRC_LOCAL_PREF;
     else if (!strcmp(count_token, "src_med")) value |= COUNT_SRC_MED;
-    else if (!strcmp(count_token, "is_symmetric")) value |= COUNT_IS_SYMMETRIC;
     else if (!strcmp(count_token, "in_iface")) value |= COUNT_IN_IFACE;
     else if (!strcmp(count_token, "out_iface")) value |= COUNT_OUT_IFACE;
     else if (!strcmp(count_token, "src_mask")) value |= COUNT_SRC_NMASK;
     else if (!strcmp(count_token, "dst_mask")) value |= COUNT_DST_NMASK;
     else if (!strcmp(count_token, "cos")) value |= COUNT_COS;
+    else if (!strcmp(count_token, "mpls_vpn_rd")) value |= COUNT_MPLS_VPN_RD;
     else Log(LOG_WARNING, "WARN ( %s ): ignoring unknown aggregation method: %s.\n", filename, count_token);
   }
 
@@ -235,7 +235,7 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   char *count_token, *range_ptr;
-  pm_id_t value, range = 0;
+  pm_id_t value = 0, range = 0;
   int changes = 0;
   char *endptr_v, *endptr_r;
   u_int8_t neg;
@@ -253,14 +253,14 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 	while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_PRETAG_MAP_ENTRIES/4) {
 	  neg = pt_check_neg(&count_token);
 	  range_ptr = pt_check_range(count_token); 
-	  value = strtoul(count_token, &endptr_v, 10);
-	  if (range_ptr) range = strtoul(range_ptr, &endptr_r, 10);
+	  value = strtoull(count_token, &endptr_v, 10);
+	  if (range_ptr) range = strtoull(range_ptr, &endptr_r, 10);
 	  else range = value;
 
 	  if (range_ptr && range <= value) {
-	      Log(LOG_ERR, "WARN ( %s ): Range value is expected in the format low-high. '%d-%d' not loaded.\n", filename, value, range);
-	      changes++;
-	      break;
+	    Log(LOG_ERR, "WARN ( %s ): Range value is expected in the format low-high. '%llu-%llu' not loaded.\n", filename, value, range);
+	    changes++;
+	    break;
 	  }
 
           list->cfg.ptf.table[list->cfg.ptf.num].neg = neg;
@@ -281,7 +281,7 @@ int cfg_key_pre_tag2_filter(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   char *count_token, *range_ptr;
-  pm_id_t value, range = 0;
+  pm_id_t value = 0, range = 0;
   int changes = 0;
   char *endptr_v, *endptr_r;
   u_int8_t neg;
@@ -299,14 +299,14 @@ int cfg_key_pre_tag2_filter(char *filename, char *name, char *value_ptr)
         while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_PRETAG_MAP_ENTRIES/4) {
           neg = pt_check_neg(&count_token);
           range_ptr = pt_check_range(count_token);
-          value = strtoul(count_token, &endptr_v, 10);
-          if (range_ptr) range = strtoul(range_ptr, &endptr_r, 10);
+          value = strtoull(count_token, &endptr_v, 10);
+          if (range_ptr) range = strtoull(range_ptr, &endptr_r, 10);
           else range = value;
 
           if (range_ptr && range <= value) {
-              Log(LOG_ERR, "WARN ( %s ): Range value is expected in the format low-high. '%d-%d' not loaded.\n", filename, value, range);
-              changes++;
-              break;
+            Log(LOG_ERR, "WARN ( %s ): Range value is expected in the format low-high. '%llu-%llu' not loaded.\n", filename, value, range);
+            changes++;
+            break;
           }
 
           list->cfg.pt2f.table[list->cfg.pt2f.num].neg = neg;
@@ -1308,6 +1308,31 @@ int cfg_key_plugin_pipe_size(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_plugin_pipe_backlog(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 0 || value >= 100) {
+    Log(LOG_WARNING, "WARN ( %s ): 'plugin_pipe_backlog' is a percentage: 0 <= plugin_pipe_backlog < 100.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_backlog = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_backlog = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_plugin_buffer_size(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -2033,17 +2058,6 @@ int cfg_key_nfacctd_bgp_src_med_map(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_nfacctd_bgp_is_symmetric_map(char *filename, char *name, char *value_ptr)
-{
-  struct plugins_list_entry *list = plugins_list;
-  int changes = 0;
-
-  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_is_symmetric_map = value_ptr;
-  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_is_symmetric_map'. Globalized.\n", filename);
-
-  return changes;
-}
-
 int cfg_key_nfacctd_bgp_to_agent_map(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -2051,6 +2065,17 @@ int cfg_key_nfacctd_bgp_to_agent_map(char *filename, char *name, char *value_ptr
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_to_agent_map = value_ptr;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_to_agent_map'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_iface_to_rd_map(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_iface_to_rd_map = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_iface_rd_map'. Globalized.\n", filename);
 
   return changes;
 }

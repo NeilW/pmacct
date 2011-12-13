@@ -76,12 +76,19 @@ struct bgp_node
 */
 };
 
+struct bgp_info_extra
+{
+  rd_t rd;
+  u_char label[3];
+};
+
 struct bgp_info
 {
   struct bgp_info *next;
   struct bgp_info *prev;
   struct bgp_peer *peer;
   struct bgp_attr *attr;
+  struct bgp_info_extra *extra;
 };
 
 /* Prototypes */

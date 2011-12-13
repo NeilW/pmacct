@@ -38,13 +38,9 @@ int PT_map_id_handler(char *filename, struct id_entry *e, char *value, struct pl
   e->id = 0;
   e->flags = FALSE;
 
-  /* If we spot a '.' within the string let's see if we are given a vaild
-      IPv4 address; by default we would treat it as an unsigned integer */
-  if (strchr(value, '.')) {
-    if (acct_type != MAP_BGP_TO_XFLOW_AGENT) {
-      Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID specified. ", filename);
-      return TRUE;
-    } 
+  /* If we parse a bgp_agent_map and spot a '.' within the string let's
+     check if we are given a valid IP address */
+  if (acct_type == MAP_BGP_TO_XFLOW_AGENT && strchr(value, '.')) {
     memset(&a, 0, sizeof(a));
     str_to_addr(value, &a);
     if (a.family == AF_INET) j = a.address.ipv4.s_addr;
@@ -53,24 +49,23 @@ int PT_map_id_handler(char *filename, struct id_entry *e, char *value, struct pl
       return TRUE;
     }
   }
-  /* If we spot the word "bgp", let's check this is a BPAS map */
-  else if (!strncmp(value, "bgp", strlen("bgp"))) {
-    if (acct_type != MAP_BGP_PEER_AS_SRC && acct_type != MAP_BGP_SRC_LOCAL_PREF && acct_type != MAP_BGP_SRC_MED) {
-      Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID specified. ", filename);
-      return TRUE;
-    }
+  else if (acct_type == MAP_BGP_IFACE_TO_RD && strchr(value, ':')) {
+    rd_t rd;
+
+    bgp_str2rd(&rd, value);
+    memcpy(&j, &rd, sizeof(rd));
+  }
+  /* If we spot the word "bgp", let's check this is a map that supports it */
+  else if ((acct_type == MAP_BGP_PEER_AS_SRC || acct_type == MAP_BGP_SRC_LOCAL_PREF ||
+	   acct_type == MAP_BGP_SRC_MED) && !strncmp(value, "bgp", strlen("bgp"))) {
     e->flags = BPAS_MAP_RCODE_BGP;
   }
   else {
-    j = strtoul(value, &endptr, 10);
-    if (!j) {
+    j = strtoull(value, &endptr, 10);
+    if (!j || j > UINT32_MAX) {
       Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID specified. ", filename);
       return TRUE;
     } 
-    else if (acct_type == MAP_BGP_IS_SYMMETRIC && j > 1) {
-      Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID specified. ", filename);
-      return TRUE;
-    }
   }
   e->id = j; 
 
@@ -82,8 +77,8 @@ int PT_map_id2_handler(char *filename, struct id_entry *e, char *value, struct p
   char *endptr = NULL;
   pm_id_t j;
 
-  j = strtoul(value, &endptr, 10);
-  if (!j) {
+  j = strtoull(value, &endptr, 10);
+  if (!j || j > UINT32_MAX) {
     Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID2 specified. ", filename);
     return TRUE;
   }
@@ -769,6 +764,31 @@ int PT_map_comms_handler(char *filename, struct id_entry *e, char *value, struct
   return TRUE;
 }
 
+int PT_map_mpls_vpn_rd_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  int x = 0, ret;
+  char *endptr, *token;
+
+  memset(&e->mpls_vpn_rd, 0, sizeof(e->mpls_vpn_rd));
+
+  e->mpls_vpn_rd.neg = pt_check_neg(&value);
+  ret = bgp_str2rd(&e->mpls_vpn_rd.rd, value);
+
+  for (x = 0; e->func[x]; x++) {
+    if (e->func_type[x] == PRETAG_MPLS_VPN_RD) {
+      Log(LOG_ERR, "ERROR ( %s ): Multiple 'mpls_vpn_rd' clauses part of the same statement. ", filename);
+      return TRUE;
+    }
+  }
+
+  if (ret) {
+    e->func[x] = pretag_mpls_vpn_rd_handler;
+    e->func_type[x] = PRETAG_MPLS_VPN_RD;
+    return FALSE;
+  }
+  else return TRUE; 
+}
+
 int PT_map_label_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   strlcpy(e->label, value, MAX_LABEL_LEN); 
@@ -1443,6 +1463,25 @@ int pretag_direction_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   default:
     return TRUE; /* this field does not exist: condition is always true */
   }
+}
+
+int pretag_mpls_vpn_rd_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *dst_ret = (struct bgp_node *) pptrs->bgp_dst;
+  struct bgp_peer *peer = (struct bgp_peer *) pptrs->bgp_peer;
+  struct bgp_info *info;
+  int ret = -1;
+
+  if (dst_ret) {
+    info = (struct bgp_info *) pptrs->bgp_dst_info;
+    if (info && info->extra) {
+      ret = memcmp(&entry->mpls_vpn_rd.rd, &info->extra->rd, sizeof(rd_t)); 
+    }
+  }
+
+  if (!ret) return (FALSE | entry->mpls_vpn_rd.neg);
+  else return (TRUE ^ entry->mpls_vpn_rd.neg);
 }
 
 int pretag_id_handler(struct packet_ptrs *pptrs, void *id, void *e)

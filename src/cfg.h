@@ -40,6 +40,7 @@ struct configuration {
   int acct_type; 
   int data_type; 
   int pipe_size;
+  int pipe_backlog;
   int buffer_size;
   int files_umask;
   int files_uid;
@@ -91,6 +92,7 @@ struct configuration {
   int print_cache_entries;
   int print_markers;
   int print_output;
+  char *print_output_file;
   int nfacctd_port;
   char *nfacctd_ip;
   char *nfacctd_allow_file;
@@ -121,8 +123,8 @@ struct configuration {
   char *nfacctd_bgp_peer_as_src_map;
   char *nfacctd_bgp_src_local_pref_map;
   char *nfacctd_bgp_src_med_map;
-  char *nfacctd_bgp_is_symmetric_map;
   char *nfacctd_bgp_to_agent_map;
+  char *nfacctd_bgp_iface_to_rd_map;
   int nfacctd_bgp_follow_default;
   struct prefix nfacctd_bgp_follow_nexthop[FOLLOW_BGP_NH_ENTRIES];
   char *nfacctd_bgp_neighbors_file;

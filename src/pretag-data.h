@@ -42,6 +42,7 @@ const struct _map_dictionary_line tag_map_dictionary[] = {
   {"local_pref", PT_map_local_pref_handler},
   {"src_comms", PT_map_src_comms_handler},
   {"comms", PT_map_comms_handler},
+  {"mpls_vpn_rd", PT_map_mpls_vpn_rd_handler},
   {"label", PT_map_label_handler},
   {"jeq", PT_map_jeq_handler},
   {"return", PT_map_return_handler},
@@ -77,6 +78,14 @@ const struct _map_dictionary_line bta_map_dictionary[] = {
 };
 
 const struct _map_dictionary_line sampling_map_dictionary[] = {
+  {"id", PT_map_id_handler},
+  {"ip", PT_map_ip_handler},
+  {"in", PT_map_input_handler},
+  {"out", PT_map_output_handler},
+  {"", NULL}
+};
+
+const struct _map_dictionary_line bitr_map_dictionary[] = {
   {"id", PT_map_id_handler},
   {"ip", PT_map_ip_handler},
   {"in", PT_map_input_handler},

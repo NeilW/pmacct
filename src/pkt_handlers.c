@@ -180,17 +180,9 @@ void evaluate_packet_handlers()
     }
 
     if (channels_list[index].aggregation & COUNT_PEER_SRC_IP) {
-      if (config.acct_type == ACCT_PM) primitives--;
-      else if (config.acct_type == ACCT_NF) {
-	if (config.nfacctd_as & NF_AS_KEEP) channels_list[index].phandler[primitives] = NF_peer_src_ip_handler;
-	else if (config.nfacctd_as & NF_AS_NEW) channels_list[index].phandler[primitives] = NF_peer_src_ip_handler; 
-	else if (config.nfacctd_as & NF_AS_BGP) primitives--; /* This is handled elsewhere */
-      }
-      else if (config.acct_type == ACCT_SF) {
-        if (config.nfacctd_as & NF_AS_KEEP) channels_list[index].phandler[primitives] = SF_peer_src_ip_handler;
-        else if (config.nfacctd_as & NF_AS_NEW) channels_list[index].phandler[primitives] = SF_peer_src_ip_handler; 
-        else if (config.nfacctd_as & NF_AS_BGP) primitives--; /* This is handled elsewhere */
-      }
+      if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_peer_src_ip_handler; 
+      else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_peer_src_ip_handler; 
+      else primitives--; /* Just in case */
       primitives++;
     }
 
@@ -269,7 +261,7 @@ void evaluate_packet_handlers()
     if (channels_list[index].aggregation & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|
                                             COUNT_AS_PATH|COUNT_PEER_DST_AS|COUNT_SRC_AS_PATH|COUNT_SRC_STD_COMM|
                                             COUNT_SRC_EXT_COMM|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|COUNT_SRC_AS|
-                                            COUNT_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|COUNT_PEER_SRC_AS) &&
+                                            COUNT_DST_AS|COUNT_PEER_DST_IP|COUNT_PEER_SRC_AS|COUNT_MPLS_VPN_RD) &&
         config.nfacctd_as & NF_AS_BGP) {
       if (config.acct_type == ACCT_PM && config.nfacctd_bgp) {
         if (channels_list[index].plugin->type.id == PLUGIN_ID_SFPROBE) {
@@ -353,13 +345,6 @@ void evaluate_packet_handlers()
           channels_list[index].phandler[primitives] = bgp_src_med_frommap_handler;
           primitives++;
         }
-      }
-    }
-
-    if (channels_list[index].aggregation & COUNT_IS_SYMMETRIC) {
-      if (config.nfacctd_bgp && config.nfacctd_bgp_is_symmetric_map) {
-        channels_list[index].phandler[primitives] = bgp_is_symmetric_frommap_handler;
-        primitives++;
       }
     }
 
@@ -744,8 +729,10 @@ void counters_handler(struct channels_list_entry *chptr, struct packet_ptrs *ppt
     pptrs->pf = 0;
   }
   else pdata->pkt_num = 1; 
-  pdata->time_start = ((struct pcap_pkthdr *)pptrs->pkthdr)->ts.tv_sec;
-  pdata->time_end = 0;
+  pdata->time_start.tv_sec = ((struct pcap_pkthdr *)pptrs->pkthdr)->ts.tv_sec;
+  pdata->time_start.tv_usec = ((struct pcap_pkthdr *)pptrs->pkthdr)->ts.tv_usec;
+  pdata->time_end.tv_sec = 0;
+  pdata->time_end.tv_usec = 0;
 }
 
 void counters_renormalize_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
@@ -1484,9 +1471,6 @@ void NF_peer_src_ip_handler(struct channels_list_entry *chptr, struct packet_ptr
 
   --pdata; /* Bringing back to original place */
 
-  /* If in a fallback scenario, ie. NF_AS_BGP + NF_AS_KEEP set, check BGP first */
-  if (chptr->plugin->cfg.nfacctd_as & NF_AS_BGP && pptrs->bgp_peer) return;
-
   if (sa->sa_family == AF_INET) {
     pbgp->peer_src_ip.address.ipv4.s_addr = ((struct sockaddr_in *)sa)->sin_addr.s_addr;
     pbgp->peer_src_ip.family = AF_INET;
@@ -1843,37 +1827,37 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
     
     if ((tpl->tpl[NF9_FIRST_SWITCHED].len || tpl->tpl[NF9_LAST_SWITCHED].len) && hdr->version == 9) {
       memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
-      pdata->time_start = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
         ((ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime))/1000);
       memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_LAST_SWITCHED].off, tpl->tpl[NF9_LAST_SWITCHED].len);
-      pdata->time_end = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
         ((ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime))/1000);
     }
     else if (tpl->tpl[NF9_FIRST_SWITCHED_MSEC].len || tpl->tpl[NF9_LAST_SWITCHED_MSEC].len) {
       memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED_MSEC].off, tpl->tpl[NF9_FIRST_SWITCHED_MSEC].len);
-      pdata->time_start = pm_ntohll(t64)/1000;
+      pdata->time_start.tv_sec = pm_ntohll(t64)/1000;
 
       memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_LAST_SWITCHED_MSEC].off, tpl->tpl[NF9_LAST_SWITCHED_MSEC].len);
-      pdata->time_end = pm_ntohll(t64)/1000;
+      pdata->time_end.tv_sec = pm_ntohll(t64)/1000;
     }
     else if (tpl->tpl[NF9_OBSERVATION_TIME_MSEC].len) {
       memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_OBSERVATION_TIME_MSEC].off, tpl->tpl[NF9_OBSERVATION_TIME_MSEC].len);
-      pdata->time_start = pm_ntohll(t64)/1000;
+      pdata->time_start.tv_sec = pm_ntohll(t64)/1000;
     }
     /* sec handling here: msec vs sec restricted up to NetFlow v8 */
     else if (tpl->tpl[NF9_FIRST_SWITCHED_SEC].len == 4 || tpl->tpl[NF9_LAST_SWITCHED_SEC].len == 4) {
       memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED_SEC].off, tpl->tpl[NF9_FIRST_SWITCHED_SEC].len);
-      pdata->time_start = ntohl(t32);
+      pdata->time_start.tv_sec = ntohl(t32);
 
       memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_LAST_SWITCHED_SEC].off, tpl->tpl[NF9_LAST_SWITCHED_SEC].len);
-      pdata->time_end = ntohl(t32);
+      pdata->time_end.tv_sec = ntohl(t32);
     }
     else if (tpl->tpl[NF9_FIRST_SWITCHED_SEC].len == 8 || tpl->tpl[NF9_LAST_SWITCHED_SEC].len == 8) {
       memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED_SEC].off, tpl->tpl[NF9_FIRST_SWITCHED_SEC].len);
-      pdata->time_start = pm_ntohll(t64);
+      pdata->time_start.tv_sec = pm_ntohll(t64);
 
       memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_LAST_SWITCHED_SEC].off, tpl->tpl[NF9_LAST_SWITCHED_SEC].len);
-      pdata->time_end = pm_ntohll(t64);
+      pdata->time_end.tv_sec = pm_ntohll(t64);
     }
     break;
   case 8:
@@ -1881,33 +1865,33 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
     case 6:
       pdata->pkt_len = ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->dPkts);
-      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->First))/1000);
-      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->Last))/1000);
       break;
     case 7:
       pdata->pkt_len = ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->dPkts);
-      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->First))/1000);
-      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->Last))/1000);
       break;
     case 8:
       pdata->pkt_len = ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->dPkts);
-      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->First))/1000);
-      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->Last))/1000);
       break;
     default:
       pdata->pkt_len = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dPkts);
-      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->First))/1000);
-      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->Last))/1000);
       break;
     }
@@ -1915,9 +1899,9 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
   default:
     pdata->pkt_len = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dOctets);
     pdata->pkt_num = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dPkts);
-    pdata->time_start = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
+    pdata->time_start.tv_sec = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v5 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v5 *) pptrs->f_data)->First))/1000); 
-    pdata->time_end = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
+    pdata->time_end.tv_sec = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v5 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v5 *) pptrs->f_data)->Last))/1000); 
     break;
   }
@@ -1970,10 +1954,10 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
     }
 
     memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
-    pdata->time_start = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+    pdata->time_start.tv_sec = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
       (ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime));
     memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_LAST_SWITCHED].off, tpl->tpl[NF9_LAST_SWITCHED].len);
-    pdata->time_end = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+    pdata->time_end.tv_sec = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
       (ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime));
     break;
   case 8:
@@ -1981,33 +1965,33 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
     case 6:
       pdata->pkt_len = ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->dPkts);
-      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->First));
-      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->Last));
       break;
     case 7:
       pdata->pkt_len = ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->dPkts);
-      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->First));
-      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->Last));
       break;
     case 8:
       pdata->pkt_len = ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->dPkts);
-      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->First));
-      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->Last));
       break;
     default:
       pdata->pkt_len = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dPkts);
-      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->First));
-      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_end.tv_sec = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->Last));
       break;
     }
@@ -2015,9 +1999,9 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
   default:
     pdata->pkt_len = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dOctets);
     pdata->pkt_num = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dPkts);
-    pdata->time_start = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
+    pdata->time_start.tv_sec = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
       (ntohl(((struct struct_header_v5 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v5 *) pptrs->f_data)->First));
-    pdata->time_end = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
+    pdata->time_end.tv_sec = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
       (ntohl(((struct struct_header_v5 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v5 *) pptrs->f_data)->Last));
     break;
   }
@@ -2069,8 +2053,10 @@ void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_pt
       pdata->pkt_num = pm_ntohll(t64);
     }
 
-    pdata->time_start = 0;
-    pdata->time_end = 0;
+    pdata->time_start.tv_sec = 0;
+    pdata->time_start.tv_usec = 0;
+    pdata->time_end.tv_sec = 0;
+    pdata->time_end.tv_usec = 0;
     break;
   case 8:
     switch(hdr->aggregation) {
@@ -2091,14 +2077,18 @@ void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_pt
       pdata->pkt_num = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dPkts);
       break;
     }
-    pdata->time_start = 0;
-    pdata->time_end = 0;
+    pdata->time_start.tv_sec = 0;
+    pdata->time_start.tv_usec = 0;
+    pdata->time_end.tv_sec = 0;
+    pdata->time_end.tv_usec = 0;
     break;
   default:
     pdata->pkt_len = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dOctets);
     pdata->pkt_num = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dPkts);
-    pdata->time_start = 0;
-    pdata->time_end = 0;
+    pdata->time_start.tv_sec = 0;
+    pdata->time_start.tv_usec = 0;
+    pdata->time_end.tv_sec = 0;
+    pdata->time_end.tv_usec = 0;
     break;
   }
 }
@@ -2643,20 +2633,8 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
 	}
       }
     }
-  }
-
-  if (chptr->aggregation & COUNT_PEER_SRC_IP && peer) {
-    if (config.nfacctd_as & NF_AS_BGP) {
-      if (!pptrs->bta && !config.nfacctd_bgp_follow_default) memcpy(&pbgp->peer_src_ip, &peer->addr, sizeof(struct host_addr)); 
-      else {
-        struct sockaddr *sa = (struct sockaddr *) pptrs->f_agent;
-
-        pbgp->peer_src_ip.family = sa->sa_family;
-        if (sa->sa_family == AF_INET) pbgp->peer_src_ip.address.ipv4.s_addr = ((struct sockaddr_in *)sa)->sin_addr.s_addr;
-#if defined ENABLE_IPV6
-        else if (sa->sa_family == AF_INET6) memcpy(&pbgp->peer_src_ip.address.ipv6, &((struct sockaddr_in6 *)sa)->sin6_addr, 16); 
-#endif
-      }
+    if (info && info->extra) {
+      if (chptr->aggregation & COUNT_MPLS_VPN_RD) memcpy(&pbgp->mpls_vpn_rd, &info->extra->rd, sizeof(rd_t)); 
     }
   }
 }
@@ -2838,17 +2816,6 @@ void bgp_src_med_frommap_handler(struct channels_list_entry *chptr, struct packe
   --pdata; /* Bringing back to original place */
 
   pbgp->src_med = pptrs->bmed;
-}
-
-void bgp_is_symmetric_frommap_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
-{
-  struct pkt_data *pdata = (struct pkt_data *) *data;
-  struct pkt_bgp_primitives *pbgp = (struct pkt_bgp_primitives *) ++pdata;
-  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
-
-  --pdata; /* Bringing back to original place */
-
-  pbgp->is_symmetric = pptrs->biss;
 }
 
 #if defined (HAVE_L2)
@@ -3048,8 +3015,10 @@ void SF_counters_new_handler(struct channels_list_entry *chptr, struct packet_pt
 
   pdata->pkt_len = sample->sampledPacketSize;
   pdata->pkt_num = 1;
-  pdata->time_start = 0;
-  pdata->time_end = 0;
+  pdata->time_start.tv_sec = 0;
+  pdata->time_start.tv_usec = 0;
+  pdata->time_end.tv_sec = 0;
+  pdata->time_end.tv_usec = 0;
 
   /* XXX: fragment handling */
 }
@@ -3221,9 +3190,6 @@ void SF_peer_src_ip_handler(struct channels_list_entry *chptr, struct packet_ptr
   SFSample *sample = (SFSample *) pptrs->f_data;
 
   --pdata; /* Bringing back to original place */
-
-  /* If in a fallback scenario, ie. NF_AS_BGP + NF_AS_KEEP set, check BGP first */
-  if (chptr->plugin->cfg.nfacctd_as & NF_AS_BGP && pptrs->bgp_peer) return;
 
   if (sample->agent_addr.type == SFLADDRESSTYPE_IP_V4) {
     pbgp->peer_src_ip.address.ipv4.s_addr = sample->agent_addr.address.ip_v4.s_addr;

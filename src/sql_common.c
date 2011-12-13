@@ -104,7 +104,7 @@ void sql_init_default_values()
   if (!(config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                 COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
 				COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-				COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)))
+				COUNT_SRC_LOCAL_PREF|COUNT_MPLS_VPN_RD)))
     PbgpSz = 0;
 
   if ( (config.what_to_count & COUNT_CLASS ||
@@ -470,15 +470,15 @@ void sql_cache_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp, st
   struct db_cache *Cursor, *newElem, *SafePtr = NULL, *staleElem = NULL;
   unsigned int cb_size = sizeof(struct cache_bgp_primitives);
 
-  if (data->time_start && config.sql_history) {
-    while (basetime > data->time_start) {
+  if (data->time_start.tv_sec && config.sql_history) {
+    while (basetime > data->time_start.tv_sec) {
       if (config.sql_history != COUNT_MONTHLY) basetime -= timeslot;
       else {
         timeslot = calc_monthly_timeslot(basetime, config.sql_history_howmany, SUB);
         basetime -= timeslot;
       }
     }
-    while ((basetime+timeslot) < data->time_start) {
+    while ((basetime+timeslot) < data->time_start.tv_sec) {
       if (config.sql_history != COUNT_MONTHLY) basetime += timeslot;
       else {
         basetime += timeslot;
@@ -626,8 +626,8 @@ void sql_cache_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp, st
     Cursor->endtime = 0;
   }
   else {
-    Cursor->basetime = data->time_start;
-    Cursor->endtime = data->time_end;
+    Cursor->basetime = data->time_start.tv_sec;
+    Cursor->endtime = data->time_end.tv_sec;
   }
   Cursor->start_tag = idata->now;
   Cursor->lru_tag = idata->now;
@@ -897,7 +897,7 @@ int sql_evaluate_primitives(int primitive)
 
     if (config.what_to_count & COUNT_SRC_LOCAL_PREF) what_to_count |= COUNT_SRC_LOCAL_PREF;
     if (config.what_to_count & COUNT_SRC_MED) what_to_count |= COUNT_SRC_MED;
-    if (config.what_to_count & COUNT_IS_SYMMETRIC) what_to_count |= COUNT_IS_SYMMETRIC;
+    if (config.what_to_count & COUNT_MPLS_VPN_RD) what_to_count |= COUNT_MPLS_VPN_RD;
 
     if (config.sql_table_version < 6) {
       if (config.what_to_count & COUNT_SRC_AS) what_to_count |= COUNT_SRC_AS;
@@ -1390,17 +1390,17 @@ int sql_evaluate_primitives(int primitive)
     primitive++;
   }
 
-  if (what_to_count & COUNT_IS_SYMMETRIC) {
+  if (what_to_count & COUNT_MPLS_VPN_RD) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(insert_clause, "is_symmetric", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
-    strncat(where[primitive].string, "is_symmetric=%u", SPACELEFT(where[primitive].string));
-    values[primitive].type = where[primitive].type = COUNT_IS_SYMMETRIC;
-    values[primitive].handler = where[primitive].handler = count_is_symmetric_handler;
+    strncat(insert_clause, "mpls_vpn_rd", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "mpls_vpn_rd=\'%s\'", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_MPLS_VPN_RD;
+    values[primitive].handler = where[primitive].handler = count_mpls_vpn_rd_handler;
     primitive++;
   }
 
@@ -1696,8 +1696,8 @@ int sql_evaluate_primitives(int primitive)
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "agent_id", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "agent_id=%u", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "%llu", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "agent_id=%llu", SPACELEFT(where[primitive].string));
       values[primitive].type = where[primitive].type = COUNT_ID;
       values[primitive].handler = where[primitive].handler = count_id_handler;
       primitive++;
@@ -1711,8 +1711,8 @@ int sql_evaluate_primitives(int primitive)
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "agent_id2", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
-    strncat(where[primitive].string, "agent_id2=%u", SPACELEFT(where[primitive].string));
+    strncat(values[primitive].string, "%llu", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "agent_id2=%llu", SPACELEFT(where[primitive].string));
     values[primitive].type = where[primitive].type = COUNT_ID2;
     values[primitive].handler = where[primitive].handler = count_id2_handler;
     primitive++;

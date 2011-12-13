@@ -58,13 +58,13 @@
 #define LARGEBUFLEN (8192+MOREBUFSZ)
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.14.0rc2"
-#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.14.0rc2"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.14.0rc2"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.14.0rc2"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.14.0rc2"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.14.0rc2"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.14.0rc2"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.14.0rc3"
+#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.14.0rc3"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.14.0rc3"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.14.0rc3"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.14.0rc3"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.14.0rc3"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.14.0rc3"
 
 #ifndef TRUE
 #define TRUE 1
@@ -95,7 +95,7 @@
 #define MAP_BGP_TO_XFLOW_AGENT	101	/* bgp_to_agent_map */
 #define MAP_BGP_SRC_LOCAL_PREF	102	/* bgp_src_local_pref_map */
 #define MAP_BGP_SRC_MED		103	/* bgp_src_med_map */
-#define MAP_BGP_IS_SYMMETRIC    104	/* bgp_is_symmetric_map */
+#define MAP_BGP_IFACE_TO_RD	104	/* bgp_iface_to_rd */
 #define MAP_SAMPLING		105	/* sampling_map */
 
 /* 47 primitives currently defined */
@@ -140,7 +140,7 @@
 #define COUNT_SRC_EXT_COMM	0x0000004000000000ULL
 #define COUNT_SRC_LOCAL_PREF	0x0000008000000000ULL
 #define COUNT_SRC_MED		0x0000010000000000ULL
-#define COUNT_IS_SYMMETRIC      0x0000020000000000ULL
+#define COUNT_MPLS_VPN_RD	0x0000020000000000ULL
 #define COUNT_IN_IFACE		0x0000040000000000ULL
 #define COUNT_OUT_IFACE		0x0000080000000000ULL
 #define COUNT_SRC_NMASK		0x0000100000000000ULL
@@ -209,7 +209,7 @@
 #define IFINDEX_TAG2		0x00000004
 
 typedef u_int32_t pm_class_t;
-typedef u_int32_t pm_id_t;
+typedef u_int64_t pm_id_t;
 
 #if defined HAVE_64BIT_COUNTERS
 typedef u_int64_t pm_counter_t;

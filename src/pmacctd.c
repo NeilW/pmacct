@@ -318,7 +318,7 @@ int main(int argc,char **argv, char **envp)
   if (!config.pcap_savefile) {
     if (getuid() != 0) {
       printf("%s\n\n", PMACCTD_USAGE_HEADER);
-      printf("ERROR: You need superuser privileges to run this command.\nExiting ...\n\n");
+      printf("ERROR ( default/core ): You need superuser privileges to run this command.\nExiting ...\n\n");
       exit(1);
     }
   }
@@ -326,11 +326,11 @@ int main(int argc,char **argv, char **envp)
   if (config.daemon) {
     list = plugins_list;
     while (list) {
-      if (!strcmp(list->type.string, "print")) printf("WARN: Daemonizing. Hmm, bye bye screen.\n");
+      if (!strcmp(list->type.string, "print")) printf("WARN ( default/core ): Daemonizing. Hmm, bye bye screen.\n");
       list = list->next;
     }
     if (debug || config.debug)
-      printf("WARN: debug is enabled; forking in background. Console logging will get lost.\n"); 
+      printf("WARN ( default/core ): debug is enabled; forking in background. Console logging will get lost.\n"); 
     daemonize();
   }
 
@@ -339,7 +339,7 @@ int main(int argc,char **argv, char **envp)
     logf = parse_log_facility(config.syslog);
     if (logf == ERR) {
       config.syslog = NULL;
-      Log(LOG_WARNING, "WARN ( default/core ): specified syslog facility is not supported; logging to console.\n");
+      printf("WARN ( default/core ): specified syslog facility is not supported; logging to console.\n");
     }
     else openlog(NULL, LOG_PID, logf);
     Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
@@ -361,16 +361,16 @@ int main(int argc,char **argv, char **envp)
     if (list->type.id != PLUGIN_ID_CORE) {
       /* applies to all plugins */
       if (config.classifiers_path && (list->cfg.sampling_rate || config.ext_sampling_rate)) {
-        Log(LOG_ERR, "ERROR: Packet sampling and classification are mutual exclusive.\n");
+        Log(LOG_ERR, "ERROR ( default/core ): Packet sampling and classification are mutual exclusive.\n");
         exit(1);
       }
       if (list->cfg.sampling_rate && config.ext_sampling_rate) {
-        Log(LOG_ERR, "ERROR: Internal packet sampling and external packet sampling are mutual exclusive.\n");
+        Log(LOG_ERR, "ERROR ( default/core ): Internal packet sampling and external packet sampling are mutual exclusive.\n");
         exit(1);
       }
 
       if (list->type.id == PLUGIN_ID_TEE) {
-        Log(LOG_ERR, "ERROR: 'tee' plugin not supported in 'pmacctd'.\n");
+        Log(LOG_ERR, "ERROR ( default/core ): 'tee' plugin not supported in 'pmacctd'.\n");
         exit(1);
       }
       else if (list->type.id == PLUGIN_ID_NFPROBE) {
@@ -418,8 +418,8 @@ int main(int argc,char **argv, char **envp)
 	if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
 				       COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
-				       COUNT_IS_SYMMETRIC)) {
-	  Log(LOG_ERR, "ERROR: 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
+				       COUNT_MPLS_VPN_RD)) {
+	  Log(LOG_ERR, "ERROR ( default/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
 	  exit(1);
 	}
 	list->cfg.what_to_count |= COUNT_COUNTERS;
@@ -455,8 +455,8 @@ int main(int argc,char **argv, char **envp)
         if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
 				       COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
-				       COUNT_IS_SYMMETRIC)) {
-          Log(LOG_ERR, "ERROR: 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
+				       COUNT_MPLS_VPN_RD)) {
+          Log(LOG_ERR, "ERROR ( default/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
           exit(1);
         }
 
@@ -611,7 +611,7 @@ int main(int argc,char **argv, char **envp)
   cb_data.device = &device;
   
   /* doing pcap stuff */
-  if (pcap_lookupnet(config.dev, &localnet, &netmask, errbuf) < 0) {
+  if (!config.dev || pcap_lookupnet(config.dev, &localnet, &netmask, errbuf) < 0) {
     localnet = 0;
     netmask = 0;
     Log(LOG_WARNING, "WARN ( default/core ): %s\n", errbuf);
@@ -683,12 +683,6 @@ int main(int argc,char **argv, char **envp)
     }
     else cb_data.bmed_table = NULL;
 
-    if (config.nfacctd_bgp_is_symmetric_map) {
-      load_id_file(MAP_BGP_IS_SYMMETRIC, config.nfacctd_bgp_is_symmetric_map, &biss_table, &req, &biss_map_allocated);
-      cb_data.biss_table = (u_char *) &biss_table;
-    }
-    else cb_data.biss_table = NULL;
-
     if (config.nfacctd_bgp_to_agent_map) {
       load_id_file(MAP_BGP_TO_XFLOW_AGENT, config.nfacctd_bgp_to_agent_map, &bta_table, &req, &bta_map_allocated);
       cb_data.bta_table = (u_char *) &bta_table;
@@ -702,6 +696,11 @@ int main(int argc,char **argv, char **envp)
        but in case maps are reloadable (ie. bta), it could be handy
        to keep a backup feed in memory */
     config.nfacctd_bgp_max_peers = 2;
+
+    if (config.nfacctd_bgp_iface_to_rd_map) {
+      Log(LOG_ERR, "ERROR ( default/core ): 'bgp_iface_to_rd_map' is not supported by this daemon. Exiting.\n");
+      exit(1);
+    }
 
     cb_data.f_agent = (char *)&client;
     nfacctd_bgp_wrapper();
