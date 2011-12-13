@@ -660,11 +660,11 @@ int main(int argc,char **argv, char **envp)
   }
   Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: bound to group %x\n", config.uacctd_group);
 
-  if (nflog_set_mode(active_nflog_group_handle, NFULNL_COPY_PACKET, 0xffff) < 0) {
+  if (nflog_set_mode(active_nflog_group_handle, NFULNL_COPY_PACKET, config.snaplen) < 0) {
     Log(LOG_ERR, "ERROR ( default/core ): Netlink NFLOG: failed to set full packet copy mode\n");
     exit_all(1);
   }
-  Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: receiving full packet details\n");
+  Log(LOG_INFO, "INFO ( default/core ): Netlink NFLOG: receiving %u bytes of packet data\n", config.snaplen);
 
   if (config.uacctd_nl_size > NFLOG_BUFLEN) {
     /* If configured buffer size is larger than default 4KB */
