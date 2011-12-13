@@ -174,7 +174,7 @@ int main(int argc,char **argv, char **envp)
   struct nflog_g_handle *active_nflog_group_handle;
   char *nflog_buffer;
   ssize_t len = 0;
-  int fd;
+  int fd, one = 1;
 #elif defined(ENABLE_ULOG)
   /* ULOG stuff */
   int ulog_fd, one = 1;
