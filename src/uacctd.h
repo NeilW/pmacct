@@ -14,13 +14,6 @@
 #define IFCACHE_LIFETIME 15 /* seconds */
 
 
-#ifndef SOL_NETLINK
-#define SOL_NETLINK    270
-#endif
-
-#ifndef NETLINK_NO_ENOBUFS
-#define NETLINK_NO_ENOBUFS 5
-#endif
 
 struct ifname_cache {
   struct ifname_cache *next;
@@ -54,4 +47,12 @@ EXT struct ifname_cache *hash_heads[IFCACHE_HASHSIZ];
 
 /* functions */
 
+#endif
+
+#ifndef SOL_NETLINK
+#define SOL_NETLINK    270
+#endif
+
+#ifndef NETLINK_NO_ENOBUFS
+#define NETLINK_NO_ENOBUFS 5
 #endif
